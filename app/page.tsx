@@ -418,7 +418,7 @@ export default function Home() {
 
         <p className="mt-6 text-center text-xs text-stone-400">
           Built with the Anthropic Citations API — every highlight is extracted from the source, not
-          generated. · <a className="hover:underline" href="https://github.com/YouQian03/citelens">GitHub</a>
+          generated. · <a className="hover:underline" href="https://github.com/AAAYQ03/citelens">GitHub</a>
         </p>
       </div>
     </main>
