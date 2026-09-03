@@ -14,11 +14,27 @@
       <button id="modeOriginal" type="button">Original</button>
       <button id="modeReader" type="button">Reader</button>
     </div>
+    <button id="settingsBtn" type="button" title="API key settings">⚙</button>
   </header>
+
+  <section id="settings" hidden>
+    <input id="keyInput" type="password" placeholder="Anthropic API key (sk-ant-…) — stored only in this browser" />
+    <button id="keySave" type="button">Save</button>
+  </section>
 
   <section id="claimCard" hidden>
     <p class="label">Claim being verified</p>
     <p id="claimText"></p>
+    <button id="analyzeBtn" type="button">⚡ Analyze: why does the source support this?</button>
+  </section>
+
+  <section id="analysisCard" hidden>
+    <div class="row">
+      <span id="verdict" class="pill"></span>
+      <span class="label" style="margin:0">Evidence → claim</span>
+    </div>
+    <p id="reasoning"></p>
+    <ul id="evidenceList"></ul>
   </section>
 
   <section id="status">

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CiteLens — verify AI citations",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Split-screen source verification on top of ChatGPT: open any cited source beside the answer, with the relevant passage highlighted.",
   "permissions": ["sidePanel", "storage", "tabs", "declarativeNetRequest"],
   "host_permissions": ["<all_urls>"],
