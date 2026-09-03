@@ -61,21 +61,6 @@ analysis. Chrome Web Store listing: coming soon.
 CiteLens sits in the unclaimed middle: it doesn't replace your AI chat, it **overlays
 verification onto the one you already use**. Zero migration cost is the distribution thesis.
 
-## Also in this repo: the web playground
-
-`/` (Next.js app) is a companion prototype exploring the *ideal* form of the same idea with
-the [Anthropic Citations API](https://platform.claude.com/docs/en/build-with-claude/citations):
-bring your own sources, ask a question, and get a split view where every sentence links
-bidirectionally to the exact passage it cites — with character-level precision, because cited
-text is extracted by the API rather than generated. Includes a zero-key demo mode.
-
-```bash
-npm install && npm run dev   # optional: ANTHROPIC_API_KEY in .env.local
-```
-
-The pair tells one story: the web app shows what citation UX looks like when you control the
-whole pipeline; the extension shows how much of it you can retrofit onto products you don't.
-
 ## Roadmap
 
 - Whole-answer overview: analyze every citation in an answer in one pass
@@ -85,8 +70,8 @@ whole pipeline; the extension shows how much of it you can retrofit onto product
 
 ## Stack
 
-Chrome MV3 (zero build step) · Side Panel + declarativeNetRequest + CSS Custom Highlight API ·
-Claude Haiku for analysis · Next.js + Tailwind + Citations API (web) · Readability for extraction
+Chrome MV3, zero build step · Side Panel + declarativeNetRequest + CSS Custom Highlight API ·
+Claude Haiku for analysis · Mozilla Readability for extraction fallback
 
 ## Privacy
 
