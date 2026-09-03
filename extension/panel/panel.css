@@ -58,6 +58,10 @@ header {
   outline: none;
 }
 #settings input:focus { border-color: #c4b5fd; background: #ede9fe; }
+#settings select {
+  flex-shrink: 0; padding: 6px 6px; border: 1px solid transparent;
+  border-radius: 8px; background: #f3f0ff; font-size: 12px; color: #44403c; outline: none;
+}
 
 /* one-line source bar */
 #srcbar {

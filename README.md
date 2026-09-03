@@ -48,8 +48,9 @@ chrome://extensions → Developer mode → Load unpacked → select extension/
 ```
 
 Then open any ChatGPT answer with citations and click a ◎. "Analyze" needs an Anthropic API
-key (⚙ in the panel) — stored only in your browser, used only when you click, ~$0.01 per
-analysis. Chrome Web Store listing: coming soon.
+key (⚙ in the panel) — stored only in your browser, used only when you click. Model is
+selectable: Opus 5 (default, ~$0.04/analysis), Sonnet 5, or Haiku 4.5. Chrome Web Store
+listing: coming soon.
 
 ## Why this product
 
@@ -71,7 +72,7 @@ verification onto the one you already use**. Zero migration cost is the distribu
 ## Stack
 
 Chrome MV3, zero build step · Side Panel + declarativeNetRequest + CSS Custom Highlight API ·
-Claude Haiku for analysis · Mozilla Readability for extraction fallback
+Claude Opus 5 for analysis (Sonnet 5 / Haiku 4.5 selectable) · Mozilla Readability for extraction fallback
 
 ## Privacy
 

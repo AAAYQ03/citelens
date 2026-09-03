@@ -189,7 +189,7 @@ async function getSourceText() {
 async function analyze() {
   if (!pendingNow?.claim) return;
   const btn = $("analyzeBtn");
-  const { anthropicKey } = await chrome.storage.local.get("anthropicKey");
+  const { anthropicKey, analysisModel } = await chrome.storage.local.get(["anthropicKey", "analysisModel"]);
   if (!anthropicKey) {
     $("settings").hidden = false;
     $("keyInput").focus();
@@ -209,14 +209,16 @@ async function analyze() {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1200,
+        model: analysisModel || "claude-opus-5",
+        max_tokens: 4000,
         messages: [{ role: "user", content: buildPrompt(pendingNow.claim, excerpt) }],
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error?.message || "API error");
-    const raw = (data.content?.[0]?.text || "").replace(/^```(json)?|```$/g, "").trim();
+    const raw = ((data.content || []).find((b) => b.type === "text")?.text || "")
+      .replace(/^```(json)?|```$/g, "")
+      .trim();
     const parsed = JSON.parse(raw);
     const nx = normWs(excerpt);
     const seen = new Set();
@@ -294,14 +296,18 @@ $("settingsBtn").addEventListener("click", () => {
   $("settings").hidden = !$("settings").hidden;
 });
 $("keySave").addEventListener("click", async () => {
-  await chrome.storage.local.set({ anthropicKey: $("keyInput").value.trim() });
+  await chrome.storage.local.set({
+    anthropicKey: $("keyInput").value.trim(),
+    analysisModel: $("modelSelect").value,
+  });
   $("settings").hidden = true;
   setStatus('<p class="hint">API key saved.</p>');
   setTimeout(() => setStatus(""), 1500);
 });
 
-chrome.storage.local.get("anthropicKey").then(({ anthropicKey }) => {
+chrome.storage.local.get(["anthropicKey", "analysisModel"]).then(({ anthropicKey, analysisModel }) => {
   if (anthropicKey) $("keyInput").value = anthropicKey;
+  if (analysisModel) $("modelSelect").value = analysisModel;
   chrome.storage.session.get("pending").then(({ pending }) => handle(pending));
 });
 chrome.storage.onChanged.addListener((changes, area) => {
