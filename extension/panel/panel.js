@@ -209,7 +209,7 @@ async function analyze() {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: analysisModel || "claude-opus-5",
+        model: analysisModel || "claude-sonnet-5",
         max_tokens: 4000,
         messages: [{ role: "user", content: buildPrompt(pendingNow.claim, excerpt) }],
       }),
