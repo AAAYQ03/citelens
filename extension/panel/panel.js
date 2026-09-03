@@ -1,22 +1,21 @@
-// CiteLens side panel — compact chrome, the source page is the main stage.
-// Original mode: real page in an iframe (per-URL DNR rule strips anti-embed headers).
-// Reader mode: Readability HTML fallback. Analyze: one Haiku call explains WHY the
-// source supports the claim; evidence quotes are validated verbatim and painted
-// into the page; the full analysis floats over the viewer instead of pushing it.
+// CiteLens side panel — the source page is the main stage.
+// The real page is embedded in an iframe (a per-URL DNR session rule strips
+// anti-embedding response headers). Analyze: one Haiku call explains WHY the
+// source supports the claim; evidence quotes are validated verbatim and
+// annotated into the page by the injected highlighter.
 
 const $ = (id) => document.getElementById(id);
 const DNR_RULE_ID = 7001;
 
 const VERDICTS = {
-  supported: ["✅ 来源支撑该结论", "✅ 支撑", "ok"],
-  partial: ["⚠️ 部分支撑", "⚠️ 部分", "partial"],
-  not_supported: ["❌ 未见支撑", "❌ 不支撑", "bad"],
+  supported: ["✅ 支撑", "ok"],
+  partial: ["⚠️ 部分", "partial"],
+  not_supported: ["❌ 不支撑", "bad"],
 };
 
 let pendingNow = null;
 let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
-let mode = "original";
 
 /* ----------------------------- text matching ----------------------------- */
 
@@ -38,13 +37,6 @@ const normWs = (s) => s.replace(/\s+/g, " ").trim();
 function setStatus(html) {
   $("status").innerHTML = html;
 }
-function setBadge(text, cls) {
-  const b = $("matchBadge");
-  if (!text) return (b.hidden = true);
-  b.hidden = false;
-  b.textContent = text;
-  b.className = "badge" + (cls ? " " + cls : "");
-}
 function showSrc(url, hint) {
   $("srcbar").hidden = false;
   const a = $("sourceUrl");
@@ -52,11 +44,6 @@ function showSrc(url, hint) {
   a.href = url;
   a.title = url;
   $("srcHint").textContent = hint || "";
-}
-function syncToggle() {
-  $("modeToggle").hidden = false;
-  $("modeOriginal").classList.toggle("active", mode === "original");
-  $("modeReader").classList.toggle("active", mode === "reader");
 }
 function hostnameOf(url) {
   try {
@@ -80,7 +67,7 @@ async function getArticle(url) {
   return article;
 }
 
-/* ------------------------------ original mode ----------------------------- */
+/* ----------------------------- embed the page ----------------------------- */
 
 async function allowEmbedding(url) {
   let domains;
@@ -108,105 +95,15 @@ async function allowEmbedding(url) {
   });
 }
 
-async function renderOriginal(pending) {
-  $("content").hidden = true;
+async function renderPage(pending) {
   const frame = $("frame");
   frame.hidden = false;
-  setBadge("original", "info");
   setStatus("");
-  showSrc(pending.url, "blank/broken? → switch to Reader");
+  showSrc(pending.url, "blank/broken? open in new tab ↗");
   try {
     await allowEmbedding(pending.url);
   } catch {}
   frame.src = pending.url;
-}
-
-/* ------------------------------- reader mode ------------------------------ */
-
-function sanitize(container, baseUrl) {
-  container
-    .querySelectorAll("script, iframe, object, embed, form, link, style, noscript, video, audio")
-    .forEach((n) => n.remove());
-  container.querySelectorAll("*").forEach((el) => {
-    [...el.attributes].forEach((at) => {
-      if (/^on/i.test(at.name)) el.removeAttribute(at.name);
-    });
-  });
-  container.querySelectorAll("img").forEach((img) => {
-    try {
-      img.src = new URL(img.getAttribute("src") || "", baseUrl).href;
-    } catch {
-      img.remove();
-      return;
-    }
-    img.removeAttribute("srcset");
-    img.loading = "lazy";
-  });
-  container.querySelectorAll("a").forEach((a) => {
-    const href = a.getAttribute("href") || "";
-    if (/^javascript:/i.test(href)) return a.removeAttribute("href");
-    try {
-      a.href = new URL(href, baseUrl).href;
-      a.target = "_blank";
-      a.rel = "noreferrer";
-    } catch {}
-  });
-}
-
-function highlightBlocks(container, claim) {
-  const claimTokens = tokenize(claim);
-  if (!claimTokens.size) return null;
-  const blocks = [...container.querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")]
-    .filter((el) => el.textContent.trim().length > 30)
-    .map((el) => ({ el, sc: score(claimTokens, tokenize(el.textContent)) }));
-  const best = blocks.reduce((m, x) => (x.sc > (m?.sc ?? 0) ? x : m), null);
-  if (!best || best.sc < 0.3) return null;
-  blocks.forEach(({ el, sc }) => {
-    if (sc >= 0.3 && el !== best.el) el.classList.add("cl-block");
-  });
-  best.el.classList.add("cl-block-best");
-  return best;
-}
-
-function applyAnalysisToContainer(container, analysis) {
-  window.CiteLensAnnotate.annotate(container, analysis.evidence || []);
-}
-
-async function renderReader(pending) {
-  $("frame").hidden = true;
-  $("frame").src = "about:blank";
-  const container = $("content");
-  container.hidden = false;
-  container.textContent = "";
-  setBadge(null);
-  setStatus('<p class="empty">Fetching & extracting…</p>');
-
-  try {
-    const article = await getArticle(pending.url);
-    setStatus("");
-    showSrc(pending.url, article.title || "");
-
-    const tpl = document.createElement("template");
-    tpl.innerHTML = article.content;
-    sanitize(tpl.content, pending.url);
-    container.appendChild(tpl.content);
-
-    const best = highlightBlocks(container, pending.claim || "");
-    if (best) {
-      setBadge(best.sc >= 0.6 ? "strong match" : "close match");
-      setTimeout(() => best.el.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-    } else {
-      setBadge("no clear match", "warn");
-    }
-    if (analysisCache.key === cacheKey(pending) && analysisCache.data) {
-      applyAnalysisToContainer(container, analysisCache.data);
-    }
-  } catch {
-    setStatus(
-      '<p class="error">Couldn\'t fetch this page (paywall / bot protection / dynamic). Try Original view or open it in a new tab.</p>'
-    );
-    showSrc(pending.url, "");
-  }
 }
 
 /* -------------------------------- analysis -------------------------------- */
@@ -214,6 +111,7 @@ async function renderReader(pending) {
 const cacheKey = (p) => p.url + "||" + p.claim;
 
 function relevantExcerpt(text, claim) {
+  if (text.length <= 12000) return text;
   const sentences = text.split(/(?<=[.!?。！？])\s+|\n+/u).filter((s) => s.trim().length > 0);
   const claimTokens = tokenize(claim);
   let best = null;
@@ -221,7 +119,6 @@ function relevantExcerpt(text, claim) {
     const sc = score(claimTokens, tokenize(s));
     if (!best || sc > best.sc) best = { s, sc };
   }
-  if (text.length <= 12000) return text;
   if (best && best.sc >= 0.25) {
     const i = text.indexOf(best.s);
     if (i >= 0) return text.slice(Math.max(0, i - 6000), i + best.s.length + 6000);
@@ -264,7 +161,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
   if (msg?.type === "analysisApplied" && pendingNow) {
     if (msg.count === 0 && msg.total > 0) {
-      setStatus('<p class="error">未能在页面中定位证据 — 试试 Reader 视图。</p>');
+      setStatus('<p class="error">未能在页面中定位证据 — 试试在新标签页打开 ↗</p>');
     } else if (msg.total > 0) {
       setStatus(msg.count < msg.total
         ? `<p class="hint">${msg.count}/${msg.total} evidence located in the page.</p>`
@@ -290,10 +187,8 @@ function getLiveText(url) {
 async function getSourceText() {
   // Prefer the RENDERED text from the embedded page (locale variants and
   // JS-rendered content differ from fetched HTML); fall back to fetching.
-  if (mode === "original") {
-    const live = await getLiveText(pendingNow.url);
-    if (live && live.length > 300) return live;
-  }
+  const live = await getLiveText(pendingNow.url);
+  if (live && live.length > 300) return live;
   const article = await getArticle(pendingNow.url);
   return article.textContent;
 }
@@ -309,7 +204,7 @@ async function analyze() {
     return;
   }
   btn.disabled = true;
-  btn.classList.add("spin");
+  btn.textContent = "Analyzing…";
   try {
     const excerpt = relevantExcerpt(await getSourceText(), pendingNow.claim);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -348,23 +243,20 @@ async function analyze() {
     chrome.storage.session.set({
       analysis: { url: pendingNow.url, evidence: parsed.evidence, ts: Date.now() },
     });
-    if (mode === "reader") applyAnalysisToContainer($("content"), parsed);
   } catch (e) {
     setStatus(`<p class="error">Analysis failed: ${e.message || e}</p>`);
   } finally {
     btn.disabled = false;
-    btn.classList.remove("spin");
+    btn.textContent = "Analyze";
   }
 }
 
 function focusEvidence(ev) {
   chrome.storage.session.set({ focus: { url: pendingNow.url, quote: ev.quote, ts: Date.now() } });
-  if (mode === "reader") window.CiteLensAnnotate.focus($("content"), ev.quote);
 }
 
 function renderAnalysis(a) {
-  const [, mini, cls] = VERDICTS[a.verdict] || ["—", "—", "partial"];
-
+  const [mini, cls] = VERDICTS[a.verdict] || ["—", "partial"];
   $("analysisStrip").hidden = false;
   const vm = $("verdictMini");
   vm.textContent = mini;
@@ -386,17 +278,10 @@ function renderAnalysis(a) {
 
 /* --------------------------------- routing -------------------------------- */
 
-function renderCurrent() {
-  if (!pendingNow) return;
-  $("emptyHint").hidden = true;
-  syncToggle();
-  if (mode === "original") renderOriginal(pendingNow);
-  else renderReader(pendingNow);
-}
-
 function handle(pending) {
   if (!pending?.url) return;
   pendingNow = pending;
+  $("emptyHint").hidden = true;
   $("claimCard").hidden = !pending.claim;
   $("claimText").textContent = pending.claim;
   $("claimText").classList.add("clamped");
@@ -405,19 +290,9 @@ function handle(pending) {
     $("reasoningRow").hidden = true;
     chrome.storage.session.remove("analysis");
   }
-  renderCurrent();
+  renderPage(pending);
 }
 
-$("modeOriginal").addEventListener("click", () => {
-  mode = "original";
-  chrome.storage.local.set({ mode });
-  renderCurrent();
-});
-$("modeReader").addEventListener("click", () => {
-  mode = "reader";
-  chrome.storage.local.set({ mode });
-  renderCurrent();
-});
 $("openOriginal").addEventListener("click", () => {
   if (pendingNow) chrome.tabs.create({ url: pendingNow.url });
 });
@@ -436,8 +311,7 @@ $("keySave").addEventListener("click", async () => {
   setTimeout(() => setStatus(""), 1500);
 });
 
-chrome.storage.local.get(["mode", "anthropicKey"]).then(({ mode: m, anthropicKey }) => {
-  if (m === "reader" || m === "original") mode = m;
+chrome.storage.local.get("anthropicKey").then(({ anthropicKey }) => {
   if (anthropicKey) $("keyInput").value = anthropicKey;
   chrome.storage.session.get("pending").then(({ pending }) => handle(pending));
 });

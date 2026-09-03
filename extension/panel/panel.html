@@ -8,30 +8,26 @@
 <body>
   <header>
     <span class="logo">◎ CiteLens</span>
-    <span id="matchBadge" class="badge" hidden></span>
     <span class="spacer"></span>
-    <div class="toggle" id="modeToggle" hidden>
-      <button id="modeOriginal" type="button">Original</button>
-      <button id="modeReader" type="button">Reader</button>
-    </div>
     <button id="settingsBtn" type="button" title="API key settings">⚙</button>
   </header>
 
   <section id="settings" hidden>
-    <input id="keyInput" type="password" placeholder="Anthropic API key (sk-ant-…) — stored only in this browser" />
-    <button id="keySave" type="button">Save</button>
+    <label for="keyInput">API Key</label>
+    <input id="keyInput" type="password" placeholder="sk-ant-… (stored only in this browser)" />
+    <button id="keySave" type="button" class="btn-primary">Save</button>
   </section>
 
   <section id="srcbar" hidden>
     <a id="sourceUrl" target="_blank" rel="noreferrer" title="Open source URL"></a>
     <span id="srcHint" class="hint"></span>
-    <button id="openOriginal" type="button" title="Open in new tab with highlight">↗</button>
+    <button id="openOriginal" type="button" title="Open in new tab">↗</button>
   </section>
 
   <section id="claimCard" hidden>
     <span class="chip">CLAIM</span>
     <p id="claimText" class="clamped" title="Click to expand"></p>
-    <button id="analyzeBtn" type="button" title="Analyze: why does the source support this?">⚡</button>
+    <button id="analyzeBtn" type="button" class="btn-primary" title="Why does the source support this claim?">Analyze</button>
   </section>
 
   <section id="analysisStrip" hidden>
@@ -49,7 +45,6 @@
 
   <div id="viewer">
     <iframe id="frame" hidden sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
-    <article id="content" hidden></article>
     <p id="emptyHint">
       Open a ChatGPT answer that cites sources, then click a
       <span class="inline-btn">◎</span> button next to any citation.
