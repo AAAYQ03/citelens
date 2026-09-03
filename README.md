@@ -48,3 +48,16 @@ No key? The **demo mode** works out of the box, and visitors can also bring thei
 
 Next.js (App Router) · Tailwind CSS · Anthropic Citations API · Mozilla Readability for URL
 extraction. Deployed on Vercel.
+
+## Chrome extension (P0)
+
+`extension/` contains a Manifest V3 extension that brings the same verification layer
+**natively onto chatgpt.com**: a ◎ button appears next to every citation in an answer;
+clicking it opens the cited page in Chrome's side panel with the best-matching passage
+highlighted (fuzzy sentence matching, no API key needed), plus an
+"open original with highlight" fallback powered by native Text Fragments.
+
+Load it via `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/`.
+
+Roadmap: LLM-based claim↔passage alignment with ✅/⚠️/❌ verdicts (BYOK), claude.ai adapter,
+exportable verification reports.

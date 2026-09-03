@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CiteLens</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <header>
+    <span class="logo">◎ CiteLens</span>
+    <span id="matchBadge" class="badge" hidden></span>
+  </header>
+
+  <section id="claimCard" hidden>
+    <p class="label">Claim being verified</p>
+    <p id="claimText"></p>
+  </section>
+
+  <section id="status">
+    <p class="empty">
+      Open a ChatGPT answer that cites sources, then click a
+      <span class="inline-btn">◎</span> button next to any citation.
+    </p>
+  </section>
+
+  <section id="sourceMeta" hidden>
+    <p id="sourceTitle"></p>
+    <a id="sourceUrl" target="_blank" rel="noreferrer"></a>
+    <button id="openOriginal" type="button">Open original with highlight ↗</button>
+  </section>
+
+  <article id="content"></article>
+
+  <script src="../vendor/readability.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

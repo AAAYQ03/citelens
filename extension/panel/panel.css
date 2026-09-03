@@ -1,0 +1,86 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #44403c;
+  background: #fafaf9;
+}
+header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fff;
+  border-bottom: 1px solid #e7e5e4;
+}
+.logo { font-weight: 700; color: #1c1917; }
+.logo::first-letter { color: #4f46e5; }
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #d1fae5;
+  color: #047857;
+}
+.badge.warn { background: #fef3c7; color: #b45309; }
+#claimCard {
+  margin: 12px 14px 0;
+  padding: 10px 12px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+}
+#claimCard .label {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6366f1;
+}
+#claimCard p { margin: 0; font-size: 13px; color: #312e81; }
+#status { padding: 8px 14px; }
+#status .empty { color: #a8a29e; font-size: 13px; }
+#status .error { color: #b91c1c; font-size: 13px; }
+.inline-btn {
+  padding: 0 4px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 12px;
+}
+#sourceMeta { padding: 12px 14px 0; }
+#sourceMeta p { margin: 0; font-weight: 600; color: #1c1917; }
+#sourceMeta a {
+  display: block;
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: #6366f1;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#openOriginal {
+  padding: 5px 10px;
+  border: 1px solid #d6d3d1;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: #44403c;
+  cursor: pointer;
+}
+#openOriginal:hover { background: #f5f5f4; }
+#content { padding: 10px 14px 40px; white-space: pre-wrap; }
+mark.hl {
+  background: #d1fae5;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+mark.hl-best {
+  background: #a7f3d0;
+  outline: 2px solid #10b981;
+  border-radius: 3px;
+}
