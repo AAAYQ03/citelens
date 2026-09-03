@@ -17,9 +17,9 @@ page and hunting for the passage yourself. CiteLens closes that gap, natively on
 
 • A ◎ button appears next to every citation in a ChatGPT answer.
 • Click it to open the original cited page in Chrome's side panel — full layout, real page.
-• Click "Analyze" to see WHY the source supports the claim: a verdict (supported / partial /
-  not supported), a reasoning chain, and verbatim evidence quotes categorized by role
-  (principle, data, conclusion, condition…).
+• Click "Analyze" to close the gap between "the AI said X" and "the source says Y": a
+  reasoning chain plus verbatim evidence quotes categorized by role (principle, data,
+  conclusion, condition…), highlighted right on the page.
 • Evidence is highlighted sentence-precisely inside the live page, with a collapsible
   "why this passage matters" note under each annotated block.
 
@@ -51,7 +51,7 @@ Analyze). No backend, no data collection. Open source: https://github.com/AAAYQ0
 ## 你需要自己做的步骤
 
 1. https://chrome.google.com/webstore/devconsole 注册开发者（$5，一次性）
-2. New item → 上传 `dist/citelens-0.5.0.zip`
+2. New item → 上传 `dist/citelens-0.5.1.zip`
 3. Store listing：粘贴上面的 Name/Summary/Description；上传 1~5 张 1280×800 截图
    （用现有测试页面截：◎ 按钮特写、侧栏嵌原页、Analyze 标注效果各一张）
 4. Privacy practices：按上面逐项粘贴；勾选 "does not collect user data"

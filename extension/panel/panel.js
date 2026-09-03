@@ -7,12 +7,6 @@
 const $ = (id) => document.getElementById(id);
 const DNR_RULE_ID = 7001;
 
-const VERDICTS = {
-  supported: ["✅ 支撑", "ok"],
-  partial: ["⚠️ 部分", "partial"],
-  not_supported: ["❌ 不支撑", "bad"],
-};
-
 let pendingNow = null;
 let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
@@ -132,7 +126,6 @@ function buildPrompt(claim, excerpt) {
     "EXCERPT of the source it cites, analyze how (and whether) the source supports the claim.\n\n" +
     "Return ONLY valid JSON, no markdown fences:\n" +
     "{\n" +
-    ' "verdict": "supported" | "partial" | "not_supported",\n' +
     ' "reasoning": "2-3 sentences explaining the logical chain from source to claim. Write in the same language as the CLAIM.",\n' +
     ' "evidence": [\n' +
     '  { "quote": "EXACT verbatim substring copied character-for-character from the EXCERPT (keep its original language)",\n' +
@@ -148,7 +141,7 @@ function buildPrompt(claim, excerpt) {
     "quote the DETAILED section, not the summary. " +
     "Quotes MUST be exact substrings of the EXCERPT (validated programmatically; paraphrases are discarded). " +
     "Each quote must be ONE sentence or clause, at most ~40 words / 100 characters — never a whole paragraph. " +
-    "If the source does not support the claim, set verdict accordingly and cite what it actually says.\n\n" +
+    "If the source does not actually support the claim, say so plainly in the reasoning and cite what it actually says.\n\n" +
     "CLAIM:\n" + claim + "\n\nEXCERPT:\n" + excerpt
   );
 }
@@ -256,11 +249,7 @@ function focusEvidence(ev) {
 }
 
 function renderAnalysis(a) {
-  const [mini, cls] = VERDICTS[a.verdict] || ["—", "partial"];
   $("analysisStrip").hidden = false;
-  const vm = $("verdictMini");
-  vm.textContent = mini;
-  vm.className = "pill " + cls;
   const chipRow = $("chipRow");
   chipRow.textContent = "";
   for (const ev of a.evidence) {

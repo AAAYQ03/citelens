@@ -30,10 +30,8 @@ from reading a claim to understanding exactly what it stands on.
    - **2–5 verbatim evidence quotes**, each tagged with a role that fits the article's genre
      (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …) — one glance tells you which passage is the
      principle, which the data, which the conclusion
-   - a short **reasoning chain** explaining how those passages add up to the claim
-   - a summary verdict (✅ supported / ⚠️ partial — e.g. the source says "most cases" but the
-     answer says "all" / ❌ not supported). With frontier models most claims do check out —
-     the verdict is a quick signal; *seeing why* is the product.
+   - a short **reasoning chain** explaining how those passages add up to the claim — and if
+     the source doesn't actually say what the answer claims, the reasoning says so plainly
 4. **Evidence painted onto the page.** Each quote is highlighted sentence-precisely in its
    role color, with a collapsible "why this passage matters" note under the paragraph.
    Role chips in the panel jump straight to their passage.
