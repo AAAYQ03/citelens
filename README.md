@@ -7,6 +7,12 @@ opening a page and hunting for the passage yourself. CiteLens closes that gap: a
 against real sources, and read the answer in a **split view where every sentence is linked,
 bidirectionally, to the exact passage it cites**.
 
+## Demo
+
+![CiteLens demo](docs/demo.gif)
+
+▶ [高清视频版 (mp4)](docs/demo.mp4)
+
 ## What it does
 
 - **Grounded answers** — bring up to 3 sources (URLs are auto-extracted, or paste text) and ask
