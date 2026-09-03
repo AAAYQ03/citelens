@@ -7,22 +7,6 @@
 const $ = (id) => document.getElementById(id);
 const DNR_RULE_ID = 7001;
 
-const ROLE_COLORS = {
-  principle: "#6366f1",
-  conclusion: "#10b981",
-  data: "#f59e0b",
-  architecture: "#a855f7",
-  condition: "#f43f5e",
-  example: "#64748b",
-};
-const ROLE_LABELS = {
-  principle: "原理",
-  conclusion: "结论",
-  data: "数据",
-  architecture: "架构",
-  condition: "条件",
-  example: "例证",
-};
 const VERDICTS = {
   supported: ["✅ 来源支撑该结论", "✅ 支撑", "ok"],
   partial: ["⚠️ 部分支撑", "⚠️ 部分", "partial"],
@@ -185,20 +169,7 @@ function highlightBlocks(container, claim) {
 }
 
 function applyAnalysisToContainer(container, analysis) {
-  const blocks = [...container.querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")];
-  for (const ev of analysis.evidence) {
-    const target = blocks.find((el) => normWs(el.textContent).includes(normWs(ev.quote)));
-    if (!target || target.querySelector(".role-chip")) continue;
-    const color = ROLE_COLORS[ev.role] || "#64748b";
-    target.style.background = color + "22";
-    target.style.borderRadius = "6px";
-    target.title = ev.note;
-    const chip = document.createElement("span");
-    chip.className = "role-chip";
-    chip.style.setProperty("--role-color", color);
-    chip.textContent = ROLE_LABELS[ev.role] || ev.role;
-    target.prepend(chip);
-  }
+  window.CiteLensAnnotate.annotate(container, analysis.evidence || []);
 }
 
 async function renderReader(pending) {
@@ -267,12 +238,16 @@ function buildPrompt(claim, excerpt) {
     ' "reasoning": "2-3 sentences explaining the logical chain from source to claim. Write in the same language as the CLAIM.",\n' +
     ' "evidence": [\n' +
     '  { "quote": "EXACT verbatim substring copied character-for-character from the EXCERPT (keep its original language)",\n' +
-    '    "role": "principle" | "conclusion" | "data" | "architecture" | "condition" | "example",\n' +
+    '    "label": "a 2-4 character category label in the language of the CLAIM, describing what KIND of content this passage is",\n' +
     '    "note": "one short sentence: why this passage matters for the claim, in the language of the CLAIM" }\n' +
     " ]\n" +
     "}\n" +
-    "Rules: 2-5 evidence items. Quotes MUST be exact substrings of the EXCERPT (this is validated " +
-    "programmatically; paraphrased quotes are discarded). Prefer short quotes (one sentence or clause). " +
+    "Label guidance: pick whatever fits THIS article's genre — common ones include " +
+    "原理/推导/结论/数据/示例/条件/背景/观点 (or Principle/Reasoning/Conclusion/Data/Example/Condition for English claims), " +
+    "but invent a better short label if none fit. Never force a category that does not match the text.\n" +
+    "Rules: 2-5 evidence items, each anchored to a DIFFERENT passage (no overlapping quotes). " +
+    "Quotes MUST be exact substrings of the EXCERPT (validated programmatically; paraphrases are discarded). " +
+    "Prefer short quotes (one sentence or clause). " +
     "If the source does not support the claim, set verdict accordingly and cite what it actually says.\n\n" +
     "CLAIM:\n" + claim + "\n\nEXCERPT:\n" + excerpt
   );
@@ -312,8 +287,16 @@ async function analyze() {
     const raw = (data.content?.[0]?.text || "").replace(/^```(json)?|```$/g, "").trim();
     const parsed = JSON.parse(raw);
     const nx = normWs(excerpt);
+    const seen = new Set();
     parsed.evidence = (parsed.evidence || [])
-      .filter((e) => e?.quote && nx.includes(normWs(e.quote)))
+      .filter((e) => {
+        if (!e?.quote || !nx.includes(normWs(e.quote))) return false;
+        const k = normWs(e.quote);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .map((e) => ({ ...e, label: normWs(e.label || "").slice(0, 6) || "证据" }))
       .slice(0, 5);
     analysisCache = { key: cacheKey(pendingNow), data: parsed };
     renderAnalysis(parsed);
@@ -331,17 +314,12 @@ async function analyze() {
 
 function focusEvidence(ev) {
   chrome.storage.session.set({ focus: { url: pendingNow.url, quote: ev.quote, ts: Date.now() } });
-  if (mode === "reader") {
-    const blocks = [...$("content").querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")];
-    const t = blocks.find((el) => normWs(el.textContent).includes(normWs(ev.quote)));
-    t?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
+  if (mode === "reader") window.CiteLensAnnotate.focus($("content"), ev.quote);
 }
 
 function renderAnalysis(a) {
-  const [full, mini, cls] = VERDICTS[a.verdict] || ["—", "—", "partial"];
+  const [, mini, cls] = VERDICTS[a.verdict] || ["—", "—", "partial"];
 
-  // summary strip
   $("analysisStrip").hidden = false;
   const vm = $("verdictMini");
   vm.textContent = mini;
@@ -351,39 +329,14 @@ function renderAnalysis(a) {
   for (const ev of a.evidence) {
     const chip = document.createElement("span");
     chip.className = "role-chip";
-    chip.style.setProperty("--role-color", ROLE_COLORS[ev.role] || "#64748b");
-    chip.textContent = ROLE_LABELS[ev.role] || ev.role;
+    chip.style.setProperty("--role-color", window.CiteLensAnnotate.colorFor(ev.label));
+    chip.textContent = ev.label;
     chip.title = ev.note || "";
     chip.addEventListener("click", () => focusEvidence(ev));
     chipRow.appendChild(chip);
   }
-
-  // floating card
-  const v = $("verdict");
-  v.textContent = full;
-  v.className = "pill " + cls;
   $("reasoning").textContent = a.reasoning || "";
-  const ul = $("evidenceList");
-  ul.textContent = "";
-  for (const ev of a.evidence) {
-    const li = document.createElement("li");
-    li.style.setProperty("--role-color", ROLE_COLORS[ev.role] || "#64748b");
-    const chip = document.createElement("span");
-    chip.className = "role-chip";
-    chip.style.setProperty("--role-color", ROLE_COLORS[ev.role] || "#64748b");
-    chip.textContent = ROLE_LABELS[ev.role] || ev.role;
-    const quote = document.createElement("span");
-    quote.className = "quote";
-    quote.textContent = "“" + ev.quote.slice(0, 120) + (ev.quote.length > 120 ? "…" : "") + "”";
-    const note = document.createElement("span");
-    note.className = "note";
-    note.textContent = ev.note || "";
-    li.append(chip, quote, note);
-    li.title = "Click to locate in the page";
-    li.addEventListener("click", () => focusEvidence(ev));
-    ul.appendChild(li);
-  }
-  $("analysisCard").hidden = false; // show once on arrival; ✕ collapses to the strip
+  $("reasoningRow").hidden = true;
 }
 
 /* --------------------------------- routing -------------------------------- */
@@ -403,8 +356,8 @@ function handle(pending) {
   $("claimText").textContent = pending.claim;
   $("claimText").classList.add("clamped");
   if (analysisCache.key !== cacheKey(pending)) {
-    $("analysisCard").hidden = true;
     $("analysisStrip").hidden = true;
+    $("reasoningRow").hidden = true;
     chrome.storage.session.remove("analysis");
   }
   renderCurrent();
@@ -426,10 +379,7 @@ $("openOriginal").addEventListener("click", () => {
 $("analyzeBtn").addEventListener("click", analyze);
 $("claimText").addEventListener("click", () => $("claimText").classList.toggle("clamped"));
 $("expandBtn").addEventListener("click", () => {
-  $("analysisCard").hidden = !$("analysisCard").hidden;
-});
-$("closeAnalysis").addEventListener("click", () => {
-  $("analysisCard").hidden = true;
+  $("reasoningRow").hidden = !$("reasoningRow").hidden;
 });
 $("settingsBtn").addEventListener("click", () => {
   $("settings").hidden = !$("settings").hidden;
