@@ -1,9 +1,8 @@
-// CiteLens side panel.
-// Original mode: embed the real page in an iframe (a per-URL session rule strips
-// anti-embedding response headers); the injected highlighter locates the passage.
-// Reader mode: fetch + Readability, rendered as formatted HTML with block highlights.
-// Analyze: one Haiku call explains WHY the source supports the claim, with
-// role-labeled verbatim evidence quotes anchored back into the page.
+// CiteLens side panel — compact chrome, the source page is the main stage.
+// Original mode: real page in an iframe (per-URL DNR rule strips anti-embed headers).
+// Reader mode: Readability HTML fallback. Analyze: one Haiku call explains WHY the
+// source supports the claim; evidence quotes are validated verbatim and painted
+// into the page; the full analysis floats over the viewer instead of pushing it.
 
 const $ = (id) => document.getElementById(id);
 const DNR_RULE_ID = 7001;
@@ -24,10 +23,15 @@ const ROLE_LABELS = {
   condition: "条件",
   example: "例证",
 };
+const VERDICTS = {
+  supported: ["✅ 来源支撑该结论", "✅ 支撑", "ok"],
+  partial: ["⚠️ 部分支撑", "⚠️ 部分", "partial"],
+  not_supported: ["❌ 未见支撑", "❌ 不支撑", "bad"],
+};
 
-let pendingNow = null; // current { url, claim }
+let pendingNow = null;
 let readerCache = { url: null, article: null };
-let analysisCache = { key: null, data: null }; // key = url + claim
+let analysisCache = { key: null, data: null };
 let mode = "original";
 
 /* ----------------------------- text matching ----------------------------- */
@@ -57,11 +61,13 @@ function setBadge(text, cls) {
   b.textContent = text;
   b.className = "badge" + (cls ? " " + cls : "");
 }
-function showMeta(title, url) {
-  $("sourceMeta").hidden = false;
-  $("sourceTitle").textContent = title;
-  $("sourceUrl").textContent = url;
-  $("sourceUrl").href = url;
+function showSrc(url, hint) {
+  $("srcbar").hidden = false;
+  const a = $("sourceUrl");
+  a.textContent = hostnameOf(url);
+  a.href = url;
+  a.title = url;
+  $("srcHint").textContent = hint || "";
 }
 function syncToggle() {
   $("modeToggle").hidden = false;
@@ -122,11 +128,9 @@ async function renderOriginal(pending) {
   $("content").hidden = true;
   const frame = $("frame");
   frame.hidden = false;
-  setBadge("showing original page", "info");
-  setStatus(
-    '<p class="hint">Blank or broken? Some sites refuse embedding — switch to Reader view.</p>'
-  );
-  showMeta(hostnameOf(pending.url), pending.url);
+  setBadge("original", "info");
+  setStatus("");
+  showSrc(pending.url, "blank/broken? → switch to Reader");
   try {
     await allowEmbedding(pending.url);
   } catch {}
@@ -184,15 +188,14 @@ function applyAnalysisToContainer(container, analysis) {
   const blocks = [...container.querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")];
   for (const ev of analysis.evidence) {
     const target = blocks.find((el) => normWs(el.textContent).includes(normWs(ev.quote)));
-    if (!target || target.querySelector(".cl-role-chip")) continue;
+    if (!target || target.querySelector(".role-chip")) continue;
     const color = ROLE_COLORS[ev.role] || "#64748b";
     target.style.background = color + "22";
     target.style.borderRadius = "6px";
     target.title = ev.note;
     const chip = document.createElement("span");
-    chip.className = "cl-role-chip role-chip";
+    chip.className = "role-chip";
     chip.style.setProperty("--role-color", color);
-    chip.style.background = color;
     chip.textContent = ROLE_LABELS[ev.role] || ev.role;
     target.prepend(chip);
   }
@@ -210,7 +213,7 @@ async function renderReader(pending) {
   try {
     const article = await getArticle(pending.url);
     setStatus("");
-    showMeta(article.title || hostnameOf(pending.url), pending.url);
+    showSrc(pending.url, article.title || "");
 
     const tpl = document.createElement("template");
     tpl.innerHTML = article.content;
@@ -219,19 +222,19 @@ async function renderReader(pending) {
 
     const best = highlightBlocks(container, pending.claim || "");
     if (best) {
-      setBadge(best.sc >= 0.6 ? "strong match found" : "close match found");
+      setBadge(best.sc >= 0.6 ? "strong match" : "close match");
       setTimeout(() => best.el.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
     } else {
-      setBadge("no clear match in article", "warn");
+      setBadge("no clear match", "warn");
     }
     if (analysisCache.key === cacheKey(pending) && analysisCache.data) {
       applyAnalysisToContainer(container, analysisCache.data);
     }
   } catch {
     setStatus(
-      '<p class="error">Couldn\'t fetch or extract this page (paywall, bot protection, or dynamic content). Try Original view or open it in a new tab.</p>'
+      '<p class="error">Couldn\'t fetch this page (paywall / bot protection / dynamic). Try Original view or open it in a new tab.</p>'
     );
-    showMeta(hostnameOf(pending.url), pending.url);
+    showSrc(pending.url, "");
   }
 }
 
@@ -286,7 +289,7 @@ async function analyze() {
     return;
   }
   btn.disabled = true;
-  btn.textContent = "⚡ Analyzing…";
+  btn.classList.add("spin");
   try {
     const article = await getArticle(pendingNow.url);
     const excerpt = relevantExcerpt(article.textContent, pendingNow.claim);
@@ -308,14 +311,12 @@ async function analyze() {
     if (!res.ok) throw new Error(data?.error?.message || "API error");
     const raw = (data.content?.[0]?.text || "").replace(/^```(json)?|```$/g, "").trim();
     const parsed = JSON.parse(raw);
-    // Keep only quotes that really appear in the excerpt (whitespace-tolerant).
     const nx = normWs(excerpt);
     parsed.evidence = (parsed.evidence || [])
       .filter((e) => e?.quote && nx.includes(normWs(e.quote)))
       .slice(0, 5);
     analysisCache = { key: cacheKey(pendingNow), data: parsed };
     renderAnalysis(parsed);
-    // Hand the evidence to the in-page highlighter (iframe / opened tabs).
     chrome.storage.session.set({
       analysis: { url: pendingNow.url, evidence: parsed.evidence, ts: Date.now() },
     });
@@ -324,31 +325,52 @@ async function analyze() {
     setStatus(`<p class="error">Analysis failed: ${e.message || e}</p>`);
   } finally {
     btn.disabled = false;
-    btn.textContent = "⚡ Analyze: why does the source support this?";
+    btn.classList.remove("spin");
+  }
+}
+
+function focusEvidence(ev) {
+  chrome.storage.session.set({ focus: { url: pendingNow.url, quote: ev.quote, ts: Date.now() } });
+  if (mode === "reader") {
+    const blocks = [...$("content").querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")];
+    const t = blocks.find((el) => normWs(el.textContent).includes(normWs(ev.quote)));
+    t?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 }
 
 function renderAnalysis(a) {
-  const card = $("analysisCard");
-  card.hidden = false;
+  const [full, mini, cls] = VERDICTS[a.verdict] || ["—", "—", "partial"];
+
+  // summary strip
+  $("analysisStrip").hidden = false;
+  const vm = $("verdictMini");
+  vm.textContent = mini;
+  vm.className = "pill " + cls;
+  const chipRow = $("chipRow");
+  chipRow.textContent = "";
+  for (const ev of a.evidence) {
+    const chip = document.createElement("span");
+    chip.className = "role-chip";
+    chip.style.setProperty("--role-color", ROLE_COLORS[ev.role] || "#64748b");
+    chip.textContent = ROLE_LABELS[ev.role] || ev.role;
+    chip.title = ev.note || "";
+    chip.addEventListener("click", () => focusEvidence(ev));
+    chipRow.appendChild(chip);
+  }
+
+  // floating card
   const v = $("verdict");
-  const map = {
-    supported: ["✅ 来源支撑该结论", "ok"],
-    partial: ["⚠️ 部分支撑", "partial"],
-    not_supported: ["❌ 未见支撑", "bad"],
-  };
-  const [label, cls] = map[a.verdict] || ["—", "partial"];
-  v.textContent = label;
+  v.textContent = full;
   v.className = "pill " + cls;
   $("reasoning").textContent = a.reasoning || "";
   const ul = $("evidenceList");
   ul.textContent = "";
   for (const ev of a.evidence) {
     const li = document.createElement("li");
-    const color = ROLE_COLORS[ev.role] || "#64748b";
-    li.style.setProperty("--role-color", color);
+    li.style.setProperty("--role-color", ROLE_COLORS[ev.role] || "#64748b");
     const chip = document.createElement("span");
     chip.className = "role-chip";
+    chip.style.setProperty("--role-color", ROLE_COLORS[ev.role] || "#64748b");
     chip.textContent = ROLE_LABELS[ev.role] || ev.role;
     const quote = document.createElement("span");
     quote.className = "quote";
@@ -358,22 +380,17 @@ function renderAnalysis(a) {
     note.textContent = ev.note || "";
     li.append(chip, quote, note);
     li.title = "Click to locate in the page";
-    li.addEventListener("click", () => {
-      chrome.storage.session.set({ focus: { url: pendingNow.url, quote: ev.quote, ts: Date.now() } });
-      if (mode === "reader") {
-        const blocks = [...$("content").querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")];
-        const t = blocks.find((el) => normWs(el.textContent).includes(normWs(ev.quote)));
-        t?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    });
+    li.addEventListener("click", () => focusEvidence(ev));
     ul.appendChild(li);
   }
+  $("analysisCard").hidden = false; // show once on arrival; ✕ collapses to the strip
 }
 
 /* --------------------------------- routing -------------------------------- */
 
 function renderCurrent() {
   if (!pendingNow) return;
+  $("emptyHint").hidden = true;
   syncToggle();
   if (mode === "original") renderOriginal(pendingNow);
   else renderReader(pendingNow);
@@ -384,9 +401,10 @@ function handle(pending) {
   pendingNow = pending;
   $("claimCard").hidden = !pending.claim;
   $("claimText").textContent = pending.claim;
-  $("sourceMeta").hidden = true;
+  $("claimText").classList.add("clamped");
   if (analysisCache.key !== cacheKey(pending)) {
     $("analysisCard").hidden = true;
+    $("analysisStrip").hidden = true;
     chrome.storage.session.remove("analysis");
   }
   renderCurrent();
@@ -406,6 +424,13 @@ $("openOriginal").addEventListener("click", () => {
   if (pendingNow) chrome.tabs.create({ url: pendingNow.url });
 });
 $("analyzeBtn").addEventListener("click", analyze);
+$("claimText").addEventListener("click", () => $("claimText").classList.toggle("clamped"));
+$("expandBtn").addEventListener("click", () => {
+  $("analysisCard").hidden = !$("analysisCard").hidden;
+});
+$("closeAnalysis").addEventListener("click", () => {
+  $("analysisCard").hidden = true;
+});
 $("settingsBtn").addEventListener("click", () => {
   $("settings").hidden = !$("settings").hidden;
 });
@@ -413,6 +438,7 @@ $("keySave").addEventListener("click", async () => {
   await chrome.storage.local.set({ anthropicKey: $("keyInput").value.trim() });
   $("settings").hidden = true;
   setStatus('<p class="hint">API key saved.</p>');
+  setTimeout(() => setStatus(""), 1500);
 });
 
 chrome.storage.local.get(["mode", "anthropicKey"]).then(({ mode: m, anthropicKey }) => {

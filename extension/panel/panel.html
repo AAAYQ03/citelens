@@ -22,37 +22,43 @@
     <button id="keySave" type="button">Save</button>
   </section>
 
+  <section id="srcbar" hidden>
+    <a id="sourceUrl" target="_blank" rel="noreferrer" title="Open source URL"></a>
+    <span id="srcHint" class="hint"></span>
+    <button id="openOriginal" type="button" title="Open in new tab with highlight">↗</button>
+  </section>
+
   <section id="claimCard" hidden>
-    <p class="label">Claim being verified</p>
-    <p id="claimText"></p>
-    <button id="analyzeBtn" type="button">⚡ Analyze: why does the source support this?</button>
+    <span class="chip">CLAIM</span>
+    <p id="claimText" class="clamped" title="Click to expand"></p>
+    <button id="analyzeBtn" type="button" title="Analyze: why does the source support this?">⚡</button>
   </section>
 
-  <section id="analysisCard" hidden>
-    <div class="row">
-      <span id="verdict" class="pill"></span>
-      <span class="label" style="margin:0">Evidence → claim</span>
-    </div>
-    <p id="reasoning"></p>
-    <ul id="evidenceList"></ul>
+  <section id="analysisStrip" hidden>
+    <span id="verdictMini" class="pill"></span>
+    <span id="chipRow"></span>
+    <span class="spacer"></span>
+    <button id="expandBtn" type="button" title="Show full analysis">▾ 详情</button>
   </section>
 
-  <section id="status">
-    <p class="empty">
-      Open a ChatGPT answer that cites sources, then click a
-      <span class="inline-btn">◎</span> button next to any citation.
-    </p>
-  </section>
-
-  <section id="sourceMeta" hidden>
-    <p id="sourceTitle"></p>
-    <a id="sourceUrl" target="_blank" rel="noreferrer"></a>
-    <button id="openOriginal" type="button">Open in new tab with highlight ↗</button>
-  </section>
+  <section id="status"></section>
 
   <div id="viewer">
     <iframe id="frame" hidden sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
     <article id="content" hidden></article>
+    <div id="analysisCard" hidden>
+      <div class="row">
+        <span id="verdict" class="pill"></span>
+        <span class="spacer"></span>
+        <button id="closeAnalysis" type="button" title="Collapse">✕</button>
+      </div>
+      <p id="reasoning"></p>
+      <ul id="evidenceList"></ul>
+    </div>
+    <p id="emptyHint">
+      Open a ChatGPT answer that cites sources, then click a
+      <span class="inline-btn">◎</span> button next to any citation.
+    </p>
   </div>
 
   <script src="../vendor/readability.js"></script>
