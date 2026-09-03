@@ -43,7 +43,7 @@ chrome://extensions → Developer mode → Load unpacked → select extension/
 
 Then open any ChatGPT answer with citations and click a ◎. "Analyze" needs an Anthropic API
 key (⚙ in the panel) — stored only in your browser, used only when you click, ~$0.01 per
-analysis. Chrome Web Store listing: in review.
+analysis. Chrome Web Store listing: coming soon.
 
 ## Why this product (the PM angle)
 
