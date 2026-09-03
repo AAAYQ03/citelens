@@ -1,83 +1,88 @@
 # ◎ CiteLens
 
-**See exactly where every AI claim comes from.**
+**AI answers cite sources as tiny numbered links. CiteLens turns them into proof you can see.**
 
-AI chat products cite sources as little numbered links — but verifying a claim still means
-opening a page and hunting for the passage yourself. CiteLens closes that gap: ask a question
-against real sources, and read the answer in a **split view where every sentence is linked,
-bidirectionally, to the exact passage it cites**.
+A Chrome extension that works natively on chatgpt.com: open any cited source *beside* the
+answer, and let AI explain — passage by passage, painted onto the live page — **why the source
+supports the claim** (or doesn't).
 
-## Demo
-
-![CiteLens demo](docs/demo.gif)
+![CiteLens demo — verifying a ChatGPT claim against its cited source](docs/demo.gif)
 
 ▶ [高清视频版 (mp4)](docs/demo.mp4)
 
-## What it does
+## The problem
 
-- **Grounded answers** — bring up to 3 sources (URLs are auto-extracted, or paste text) and ask
-  a question. Answers are generated with the [Anthropic Citations API](https://platform.claude.com/docs/en/build-with-claude/citations),
-  so every cited passage is *extracted from the source, not generated* — highlights can't hallucinate.
-- **Claim-level verification badges** — sentences backed by a source are marked green;
-  substantive sentences with **no source support get a ⚠ badge** automatically.
-- **Bidirectional sync** — click a sentence on the left → the source panel scrolls to the exact
-  passage and highlights it. Click a highlight on the right → jump back to every claim citing it.
-- **Zero-setup demo** — a built-in example works with no API key, so anyone can feel the
-  interaction in one click.
+When ChatGPT or Claude cites a source, verifying a single claim means: open the link, skim the
+whole page, guess which paragraph the model meant, and judge for yourself whether it actually
+says that. Nobody does this — which is exactly how hallucinated claims survive.
 
-## Why (the product angle)
+CiteLens is a **verification layer** built around one metric: *time-to-verify*.
 
-Existing tools split into two camps:
+## How it works
 
-| Camp | Examples | Gap |
-| --- | --- | --- |
-| RAG "chat with your docs" | NotebookLM, Kotaemon, RAGFlow | Great in-doc citations, but one-directional and locked to their own chat |
-| General AI chat with web cites | ChatGPT, Perplexity | Citations are links, not passages — verification is still manual |
+1. **◎ next to every citation.** In any ChatGPT answer, each cited link gets a ◎ button.
+2. **The real page, split-screen.** Click it and the original source opens in Chrome's side
+   panel — full layout, not a stripped-down reader view.
+3. **One click: "Analyze".** A fast LLM call returns a verdict
+   (✅ supported / ⚠️ partial / ❌ not supported), a short reasoning chain, and 2–5 verbatim
+   evidence quotes, each tagged with a role that fits the article's genre
+   (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …).
+4. **Evidence painted onto the page.** Each quote is highlighted sentence-precisely in its
+   role color, with a collapsible "why this passage matters" note under the paragraph.
+   Role chips in the panel jump straight to their passage.
 
-CiteLens explores the middle: a lightweight **verification layer** for AI answers, built around
-*time-to-verify* as the core metric. Roadmap: manual verified/contradicted marking + exportable
-verification reports → PDF sources → multi-model "citation diff" (ask GPT/Claude/Gemini the same
-question, compare whose claims survive checking).
+**Annotations can't hallucinate.** Every quote is validated as an exact substring of the
+page's rendered text before anything is drawn — if the model paraphrases, the quote is
+discarded, and the panel reports how many evidence items were actually located.
 
-## Run locally
+## Install
 
-```bash
-npm install
-cp .env.example .env.local   # optional: add ANTHROPIC_API_KEY
-npm run dev
+```
+chrome://extensions → Developer mode → Load unpacked → select extension/
 ```
 
-No key? The **demo mode** works out of the box, and visitors can also bring their own key
-(kept in localStorage, sent only with their own requests).
+Then open any ChatGPT answer with citations and click a ◎. "Analyze" needs an Anthropic API
+key (⚙ in the panel) — stored only in your browser, used only when you click, ~$0.01 per
+analysis. Chrome Web Store listing: in review.
+
+## Why this product (the PM angle)
+
+| Camp | Examples | What's missing |
+| --- | --- | --- |
+| RAG "chat with your docs" | NotebookLM, Kotaemon, RAGFlow | Great in-doc citations — but only inside their own chat, for your own files |
+| AI chat with web citations | ChatGPT, Perplexity | Citations are links, not passages — verification is still manual |
+
+CiteLens sits in the unclaimed middle: it doesn't replace your AI chat, it **overlays
+verification onto the one you already use**. Zero migration cost is the distribution thesis.
+
+## Also in this repo: the web playground
+
+`/` (Next.js app) is a companion prototype exploring the *ideal* form of the same idea with
+the [Anthropic Citations API](https://platform.claude.com/docs/en/build-with-claude/citations):
+bring your own sources, ask a question, and get a split view where every sentence links
+bidirectionally to the exact passage it cites — with character-level precision, because cited
+text is extracted by the API rather than generated. Includes a zero-key demo mode.
+
+```bash
+npm install && npm run dev   # optional: ANTHROPIC_API_KEY in .env.local
+```
+
+The pair tells one story: the web app shows what citation UX looks like when you control the
+whole pipeline; the extension shows how much of it you can retrofit onto products you don't.
+
+## Roadmap
+
+- Whole-answer overview: verify every citation in one pass ("7 citations: 5✅ 1⚠️ 1❌")
+- Select any text in the answer → verify it, beyond citation granularity
+- claude.ai adapter (the ChatGPT adapter is ~50 lines; selectors are config)
+- Exportable verification reports; multi-model "citation diff"
 
 ## Stack
 
-Next.js (App Router) · Tailwind CSS · Anthropic Citations API · Mozilla Readability for URL
-extraction. Deployed on Vercel.
+Chrome MV3 (zero build step) · Side Panel + declarativeNetRequest + CSS Custom Highlight API ·
+Claude Haiku for analysis · Next.js + Tailwind + Citations API (web) · Readability for extraction
 
-## Chrome extension
+## Privacy
 
-`extension/` is a Manifest V3 Chrome extension (zero build step) that brings the verification
-layer **natively onto chatgpt.com**:
-
-1. A ◎ button appears next to every citation in a ChatGPT answer.
-2. Clicking it opens the **original cited page** in Chrome's side panel — a per-URL
-   `declarativeNetRequest` session rule strips anti-embedding headers so the real page renders
-   with its full layout.
-3. **Analyze** (one Haiku call, bring-your-own Anthropic key stored only in the browser) explains
-   *why the source supports the claim*: a verdict (✅ supported / ⚠️ partial / ❌ not supported),
-   a reasoning chain, and 2–5 verbatim evidence quotes with open-ended category labels
-   (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …, chosen to fit the article's genre).
-4. Evidence is painted **into the live page**: sentence-precise colored highlights via the CSS
-   Custom Highlight API (no DOM breakage), and a collapsible "why this passage matters" note
-   under each annotated block. Chips in the panel jump straight to their passage.
-
-Anti-hallucination: quotes are validated as exact substrings of the page text before anything
-is rendered — an annotation can never point at text that isn't really there. Analysis runs on
-the **rendered** page text (not fetched HTML), so locale variants and JS-rendered content
-anchor correctly; the panel reports how many evidence items were located.
-
-Install: `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/`.
-
-Roadmap: whole-answer overview (verify every citation in one pass), select-any-text
-verification, claude.ai adapter, exportable verification reports.
+No backend, no data collection. Your API key lives in `chrome.storage.local`; page text goes
+only to the Anthropic API, only when you click Analyze. Full policy: [PRIVACY.md](PRIVACY.md)
