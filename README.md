@@ -15,7 +15,8 @@ the source leads to the claim**.
 A citation tells you a source *exists* — not which passage the claim came from, or how that
 passage leads to the claim. Between "the AI said X" and "the source says Y" there is a
 **derivation gap** that readers are left to close themselves: open the link, skim the whole
-page, guess which paragraph the model meant, reconstruct the reasoning. Nobody does this.
+page, guess which paragraph the model meant, reconstruct the reasoning. That takes far too
+much time to do for every claim.
 
 CiteLens closes that gap for you, built around one metric: *time-to-verify* — how fast you go
 from reading a claim to understanding exactly what it stands on.
@@ -50,7 +51,7 @@ Then open any ChatGPT answer with citations and click a ◎. "Analyze" needs an 
 key (⚙ in the panel) — stored only in your browser, used only when you click, ~$0.01 per
 analysis. Chrome Web Store listing: coming soon.
 
-## Why this product (the PM angle)
+## Why this product
 
 | Camp | Examples | What's missing |
 | --- | --- | --- |
@@ -77,7 +78,7 @@ whole pipeline; the extension shows how much of it you can retrofit onto product
 
 ## Roadmap
 
-- Whole-answer overview: verify every citation in one pass ("7 citations: 5✅ 1⚠️ 1❌")
+- Whole-answer overview: analyze every citation in an answer in one pass
 - Select any text in the answer → verify it, beyond citation granularity
 - claude.ai adapter (the ChatGPT adapter is ~50 lines; selectors are config)
 - Exportable verification reports; multi-model "citation diff"
