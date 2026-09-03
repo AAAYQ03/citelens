@@ -49,15 +49,29 @@ No key? The **demo mode** works out of the box, and visitors can also bring thei
 Next.js (App Router) · Tailwind CSS · Anthropic Citations API · Mozilla Readability for URL
 extraction. Deployed on Vercel.
 
-## Chrome extension (P0)
+## Chrome extension
 
-`extension/` contains a Manifest V3 extension that brings the same verification layer
-**natively onto chatgpt.com**: a ◎ button appears next to every citation in an answer;
-clicking it opens the cited page in Chrome's side panel with the best-matching passage
-highlighted (fuzzy sentence matching, no API key needed), plus an
-"open original with highlight" fallback powered by native Text Fragments.
+`extension/` is a Manifest V3 Chrome extension (zero build step) that brings the verification
+layer **natively onto chatgpt.com**:
 
-Load it via `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/`.
+1. A ◎ button appears next to every citation in a ChatGPT answer.
+2. Clicking it opens the **original cited page** in Chrome's side panel — a per-URL
+   `declarativeNetRequest` session rule strips anti-embedding headers so the real page renders
+   with its full layout.
+3. **Analyze** (one Haiku call, bring-your-own Anthropic key stored only in the browser) explains
+   *why the source supports the claim*: a verdict (✅ supported / ⚠️ partial / ❌ not supported),
+   a reasoning chain, and 2–5 verbatim evidence quotes with open-ended category labels
+   (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …, chosen to fit the article's genre).
+4. Evidence is painted **into the live page**: sentence-precise colored highlights via the CSS
+   Custom Highlight API (no DOM breakage), and a collapsible "why this passage matters" note
+   under each annotated block. Chips in the panel jump straight to their passage.
 
-Roadmap: LLM-based claim↔passage alignment with ✅/⚠️/❌ verdicts (BYOK), claude.ai adapter,
-exportable verification reports.
+Anti-hallucination: quotes are validated as exact substrings of the page text before anything
+is rendered — an annotation can never point at text that isn't really there. Analysis runs on
+the **rendered** page text (not fetched HTML), so locale variants and JS-rendered content
+anchor correctly; the panel reports how many evidence items were located.
+
+Install: `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/`.
+
+Roadmap: whole-answer overview (verify every citation in one pass), select-any-text
+verification, claude.ai adapter, exportable verification reports.
