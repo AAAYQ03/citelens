@@ -23,10 +23,15 @@ CiteLens is a **verification layer** built around one metric: *time-to-verify*.
 1. **◎ next to every citation.** In any ChatGPT answer, each cited link gets a ◎ button.
 2. **The real page, split-screen.** Click it and the original source opens in Chrome's side
    panel — full layout, not a stripped-down reader view.
-3. **One click: "Analyze".** A fast LLM call returns a verdict
-   (✅ supported / ⚠️ partial / ❌ not supported), a short reasoning chain, and 2–5 verbatim
-   evidence quotes, each tagged with a role that fits the article's genre
-   (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …).
+3. **One click: "Analyze".** A fast LLM call compares the claim against the source and
+   returns a verdict:
+   - ✅ **supported** — the source genuinely backs the claim
+   - ⚠️ **partial** — only partly: e.g. the source says "most cases", the answer says "all"
+   - ❌ **not supported** — the source never says this, or says the opposite (a caught
+     hallucination)
+
+   plus a short reasoning chain and 2–5 verbatim evidence quotes, each tagged with a role
+   that fits the article's genre (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …).
 4. **Evidence painted onto the page.** Each quote is highlighted sentence-precisely in its
    role color, with a collapsible "why this passage matters" note under the paragraph.
    Role chips in the panel jump straight to their passage.
