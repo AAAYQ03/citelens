@@ -221,11 +221,12 @@ function relevantExcerpt(text, claim) {
     const sc = score(claimTokens, tokenize(s));
     if (!best || sc > best.sc) best = { s, sc };
   }
+  if (text.length <= 12000) return text;
   if (best && best.sc >= 0.25) {
     const i = text.indexOf(best.s);
-    if (i >= 0) return text.slice(Math.max(0, i - 2000), i + best.s.length + 2000);
+    if (i >= 0) return text.slice(Math.max(0, i - 6000), i + best.s.length + 6000);
   }
-  return text.slice(0, 5000);
+  return text.slice(0, 12000);
 }
 
 function buildPrompt(claim, excerpt) {
@@ -246,11 +247,55 @@ function buildPrompt(claim, excerpt) {
     "原理/推导/结论/数据/示例/条件/背景/观点 (or Principle/Reasoning/Conclusion/Data/Example/Condition for English claims), " +
     "but invent a better short label if none fit. Never force a category that does not match the text.\n" +
     "Rules: 2-5 evidence items, each anchored to a DIFFERENT passage (no overlapping quotes). " +
+    "When the same idea appears in BOTH an intro/summary paragraph and a detailed section below, " +
+    "quote the DETAILED section, not the summary. " +
     "Quotes MUST be exact substrings of the EXCERPT (validated programmatically; paraphrases are discarded). " +
-    "Prefer short quotes (one sentence or clause). " +
+    "Each quote must be ONE sentence or clause, at most ~40 words / 100 characters — never a whole paragraph. " +
     "If the source does not support the claim, set verdict accordingly and cite what it actually says.\n\n" +
     "CLAIM:\n" + claim + "\n\nEXCERPT:\n" + excerpt
   );
+}
+
+const liveTextWaiters = new Map();
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === "pageText" && liveTextWaiters.has(msg.url)) {
+    liveTextWaiters.get(msg.url)(msg.text || null);
+    liveTextWaiters.delete(msg.url);
+  }
+  if (msg?.type === "analysisApplied" && pendingNow) {
+    if (msg.count === 0 && msg.total > 0) {
+      setStatus('<p class="error">未能在页面中定位证据 — 试试 Reader 视图。</p>');
+    } else if (msg.total > 0) {
+      setStatus(msg.count < msg.total
+        ? `<p class="hint">${msg.count}/${msg.total} evidence located in the page.</p>`
+        : "");
+    }
+  }
+});
+
+function getLiveText(url) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      liveTextWaiters.delete(url);
+      resolve(null);
+    }, 2500);
+    liveTextWaiters.set(url, (text) => {
+      clearTimeout(t);
+      resolve(text);
+    });
+    chrome.storage.session.set({ textRequest: { url, ts: Date.now() } });
+  });
+}
+
+async function getSourceText() {
+  // Prefer the RENDERED text from the embedded page (locale variants and
+  // JS-rendered content differ from fetched HTML); fall back to fetching.
+  if (mode === "original") {
+    const live = await getLiveText(pendingNow.url);
+    if (live && live.length > 300) return live;
+  }
+  const article = await getArticle(pendingNow.url);
+  return article.textContent;
 }
 
 async function analyze() {
@@ -266,8 +311,7 @@ async function analyze() {
   btn.disabled = true;
   btn.classList.add("spin");
   try {
-    const article = await getArticle(pendingNow.url);
-    const excerpt = relevantExcerpt(article.textContent, pendingNow.claim);
+    const excerpt = relevantExcerpt(await getSourceText(), pendingNow.claim);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -290,7 +334,8 @@ async function analyze() {
     const seen = new Set();
     parsed.evidence = (parsed.evidence || [])
       .filter((e) => {
-        if (!e?.quote || !nx.includes(normWs(e.quote))) return false;
+        if (!e?.quote || normWs(e.quote).length > 300) return false;
+        if (!nx.includes(normWs(e.quote))) return false;
         const k = normWs(e.quote);
         if (seen.has(k)) return false;
         seen.add(k);

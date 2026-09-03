@@ -1,8 +1,9 @@
 // CiteLens shared annotation engine — used by both the in-page highlighter
 // (content script) and the panel's reader mode.
-// Sentence-precise coloring via the CSS Custom Highlight API (no DOM mutation
-// inside the text), plus one collapsible note element inserted under each
-// annotated block (multiple evidence items on the same block share one note).
+// Quotes are located with a whitespace-normalized index over the WHOLE root
+// (works on div-heavy pages, quotes crossing inline elements), colored via the
+// CSS Custom Highlight API (no DOM mutation inside text), and each annotated
+// block gets one collapsible note under it.
 window.CiteLensAnnotate = (() => {
   const FIXED = {
     "原理": "#6366f1", "推导": "#8b5cf6", "结论": "#10b981", "数据": "#f59e0b",
@@ -54,20 +55,19 @@ window.CiteLensAnnotate = (() => {
     (doc.head || doc.documentElement).appendChild(style);
   }
 
-  const BLOCK_SEL = "p, li, blockquote, h1, h2, h3, h4, td, pre";
-  const blocksOf = (root) =>
-    [...root.querySelectorAll(BLOCK_SEL)].filter(
-      (el) => !el.closest(".citelens-note") && normWs(el.textContent).length > 20
-    );
+  const SKIP = "script, style, noscript, textarea, svg, .citelens-note";
 
-  // Build a whitespace-normalized index of a block's text nodes so a quote can
-  // be located precisely even when it spans multiple inline elements.
-  function rangeIn(block, nq, doc) {
-    const walker = doc.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) =>
-        n.parentElement?.closest(".citelens-note")
-          ? NodeFilter.FILTER_REJECT
-          : NodeFilter.FILTER_ACCEPT,
+  // Whitespace-normalized character index over every visible text node in root.
+  function buildIndex(root, doc) {
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => {
+        const p = n.parentElement;
+        if (!p || p.closest(SKIP)) return NodeFilter.FILTER_REJECT;
+        try {
+          if (p.checkVisibility && !p.checkVisibility()) return NodeFilter.FILTER_REJECT;
+        } catch {}
+        return NodeFilter.FILTER_ACCEPT;
+      },
     });
     let norm = "";
     const map = [];
@@ -89,15 +89,27 @@ window.CiteLensAnnotate = (() => {
         }
       }
     }
-    const idx = norm.indexOf(nq);
+    return { norm, map };
+  }
+
+  function rangeFromIndex(index, nq, doc) {
+    const idx = index.norm.indexOf(nq);
     if (idx < 0) return null;
-    const s = map[idx];
-    const e = map[idx + nq.length - 1];
+    const s = index.map[idx];
+    const e = index.map[idx + nq.length - 1];
     if (!s || !e) return null;
     const range = doc.createRange();
     range.setStart(s.n, s.i);
     range.setEnd(e.n, e.i + 1);
     return range;
+  }
+
+  // The element the note should hang under: the smallest block containing the
+  // whole quote.
+  function blockFor(range) {
+    let el = range.commonAncestorContainer;
+    if (el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    return el?.closest("p, li, blockquote, h1, h2, h3, h4, td, pre") || el;
   }
 
   function paint(doc, range, color) {
@@ -162,32 +174,36 @@ window.CiteLensAnnotate = (() => {
     note.querySelector(".cl-body").appendChild(row);
   }
 
+  // Returns how many evidence items were newly anchored. Safe to call again
+  // (e.g. after dynamic content loads): already-applied quotes are skipped.
   function annotate(root, evidence) {
     const doc = root.ownerDocument || document;
     ensureStyle(doc);
     const st = stateFor(root);
-    const blocks = blocksOf(root);
-    let applied = 0;
-    for (const ev of evidence || []) {
+    const remaining = (evidence || []).filter((ev) => {
       const nq = normWs(ev.quote || "");
+      return nq && !st.applied.has(nq);
+    });
+    if (!remaining.length) return 0;
+    const index = buildIndex(root, doc);
+    let applied = 0;
+    for (const ev of remaining) {
+      const nq = normWs(ev.quote);
       const label = normWs(ev.label || "") || "证据";
-      if (!nq || st.applied.has(nq)) continue;
-      let hit = null;
-      for (const b of blocks) {
-        const r = rangeIn(b, nq, doc);
-        if (r) {
-          hit = { b, r };
-          break;
-        }
-      }
-      if (!hit) continue;
+      const range = rangeFromIndex(index, nq, doc);
+      if (!range) continue;
       st.applied.add(nq);
-      st.quoteBlock.set(nq, hit.b);
-      paint(doc, hit.r, colorFor(label));
-      addNote(doc, st, hit.b, { ...ev, label });
+      const block = blockFor(range);
+      st.quoteBlock.set(nq, block);
+      paint(doc, range, colorFor(label));
+      addNote(doc, st, block, { ...ev, label });
       applied++;
     }
     return applied;
+  }
+
+  function appliedCount(root) {
+    return stateFor(root).applied.size;
   }
 
   function focus(root, quote) {
@@ -200,5 +216,5 @@ window.CiteLensAnnotate = (() => {
     return true;
   }
 
-  return { annotate, focus, colorFor };
+  return { annotate, focus, colorFor, appliedCount };
 })();
