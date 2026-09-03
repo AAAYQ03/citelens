@@ -3,8 +3,8 @@
 **AI answers cite sources as tiny numbered links. CiteLens turns them into proof you can see.**
 
 A Chrome extension that works natively on chatgpt.com: open any cited source *beside* the
-answer, and let AI explain — passage by passage, painted onto the live page — **why the source
-supports the claim** (or doesn't).
+answer, and let AI walk you — passage by passage, painted onto the live page — through **how
+the source leads to the claim**.
 
 ![CiteLens demo — verifying a ChatGPT claim against its cited source](docs/demo.gif)
 
@@ -12,26 +12,28 @@ supports the claim** (or doesn't).
 
 ## The problem
 
-When ChatGPT or Claude cites a source, verifying a single claim means: open the link, skim the
-whole page, guess which paragraph the model meant, and judge for yourself whether it actually
-says that. Nobody does this — which is exactly how hallucinated claims survive.
+A citation tells you a source *exists* — not which passage the claim came from, or how that
+passage leads to the claim. Between "the AI said X" and "the source says Y" there is a
+**derivation gap** that readers are left to close themselves: open the link, skim the whole
+page, guess which paragraph the model meant, reconstruct the reasoning. Nobody does this.
 
-CiteLens is a **verification layer** built around one metric: *time-to-verify*.
+CiteLens closes that gap for you, built around one metric: *time-to-verify* — how fast you go
+from reading a claim to understanding exactly what it stands on.
 
 ## How it works
 
 1. **◎ next to every citation.** In any ChatGPT answer, each cited link gets a ◎ button.
 2. **The real page, split-screen.** Click it and the original source opens in Chrome's side
    panel — full layout, not a stripped-down reader view.
-3. **One click: "Analyze".** A fast LLM call compares the claim against the source and
-   returns a verdict:
-   - ✅ **supported** — the source genuinely backs the claim
-   - ⚠️ **partial** — only partly: e.g. the source says "most cases", the answer says "all"
-   - ❌ **not supported** — the source never says this, or says the opposite (a caught
-     hallucination)
-
-   plus a short reasoning chain and 2–5 verbatim evidence quotes, each tagged with a role
-   that fits the article's genre (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …).
+3. **One click: "Analyze".** Not a yes/no fact-check — a fast LLM call that closes the
+   derivation gap:
+   - **2–5 verbatim evidence quotes**, each tagged with a role that fits the article's genre
+     (原理 / 推导 / 结论 / 数据 / 示例 / 条件 …) — one glance tells you which passage is the
+     principle, which the data, which the conclusion
+   - a short **reasoning chain** explaining how those passages add up to the claim
+   - a summary verdict (✅ supported / ⚠️ partial — e.g. the source says "most cases" but the
+     answer says "all" / ❌ not supported). With frontier models most claims do check out —
+     the verdict is a quick signal; *seeing why* is the product.
 4. **Evidence painted onto the page.** Each quote is highlighted sentence-precisely in its
    role color, with a collapsible "why this passage matters" note under the paragraph.
    Role chips in the panel jump straight to their passage.
