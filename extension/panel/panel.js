@@ -1,20 +1,22 @@
-// CiteLens side panel: fetch the cited page, extract readable text, and
-// highlight the sentences that best match the claim.
+// CiteLens side panel.
+// Original mode: embed the real page in an iframe (a per-URL session rule strips
+// the anti-embedding response headers); the injected highlighter locates the passage.
+// Reader mode: fetch + Readability, rendered as formatted HTML with block highlights.
 
 const $ = (id) => document.getElementById(id);
-let currentBest = null; // { sentence, url }
+const DNR_RULE_ID = 7001;
+
+let pendingNow = null; // current { url, claim }
+let readerCache = { url: null, article: null };
+let mode = "original";
+
+/* ----------------------------- text matching ----------------------------- */
 
 function tokenize(s) {
   return new Set(
-    s
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N} ]/gu, " ")
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
+    s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter((w) => w.length > 2)
   );
 }
-
-// Containment score: how much of the smaller token set is inside the other.
 function score(a, b) {
   if (!a.size || !b.size) return 0;
   let inter = 0;
@@ -22,109 +24,208 @@ function score(a, b) {
   return inter / Math.min(a.size, b.size);
 }
 
-function splitSentences(text) {
-  return text
-    .split(/(?<=[.!?。！？])\s+|\n+/u)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+/* --------------------------------- UI bits -------------------------------- */
 
 function setStatus(html) {
   $("status").innerHTML = html;
 }
-
-function render(article, claim, url) {
-  const title = article.title || new URL(url).hostname;
-  const text = article.textContent.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-
+function setBadge(text, cls) {
+  const b = $("matchBadge");
+  if (!text) return (b.hidden = true);
+  b.hidden = false;
+  b.textContent = text;
+  b.className = "badge" + (cls ? " " + cls : "");
+}
+function showMeta(title, url) {
   $("sourceMeta").hidden = false;
   $("sourceTitle").textContent = title;
   $("sourceUrl").textContent = url;
   $("sourceUrl").href = url;
+}
+function syncToggle() {
+  $("modeToggle").hidden = false;
+  $("modeOriginal").classList.toggle("active", mode === "original");
+  $("modeReader").classList.toggle("active", mode === "reader");
+}
 
-  const claimTokens = tokenize(claim);
-  const sentences = splitSentences(text).map((s) => ({ s, score: score(claimTokens, tokenize(s)) }));
-  const best = sentences.reduce((m, x) => (x.score > (m?.score ?? 0) ? x : m), null);
-  const threshold = 0.35;
-  const hasMatch = best && best.score >= threshold && best.s.length > 20;
-  currentBest = hasMatch ? { sentence: best.s, url } : { sentence: null, url };
+/* ------------------------------ original mode ----------------------------- */
 
-  const badge = $("matchBadge");
-  badge.hidden = false;
-  if (hasMatch) {
-    badge.textContent = best.score >= 0.6 ? "strong match found" : "close match found";
-    badge.className = "badge";
-  } else {
-    badge.textContent = "no clear match in extracted text";
-    badge.className = "badge warn";
+async function allowEmbedding(url) {
+  let domains;
+  try {
+    domains = [new URL(url).hostname];
+  } catch {
+    return;
   }
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [DNR_RULE_ID],
+    addRules: [
+      {
+        id: DNR_RULE_ID,
+        priority: 1,
+        action: {
+          type: "modifyHeaders",
+          responseHeaders: [
+            { header: "x-frame-options", operation: "remove" },
+            { header: "content-security-policy", operation: "remove" },
+          ],
+        },
+        condition: { requestDomains: domains, resourceTypes: ["sub_frame"] },
+      },
+    ],
+  });
+}
 
-  const container = $("content");
-  container.textContent = "";
-  let bestEl = null;
-  for (const { s, score: sc } of sentences) {
-    let el;
-    if (hasMatch && s === best.s) {
-      el = document.createElement("mark");
-      el.className = "hl hl-best";
-      bestEl = el;
-    } else if (sc >= threshold && s.length > 20) {
-      el = document.createElement("mark");
-      el.className = "hl";
-    } else {
-      el = document.createElement("span");
+async function renderOriginal(pending) {
+  $("content").hidden = true;
+  const frame = $("frame");
+  frame.hidden = false;
+  setBadge("showing original page", "info");
+  setStatus(
+    '<p class="hint">Blank or broken? Some sites refuse embedding — switch to Reader view.</p>'
+  );
+  showMeta(hostnameOf(pending.url), pending.url);
+  try {
+    await allowEmbedding(pending.url);
+  } catch {}
+  frame.src = pending.url;
+}
+
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+/* ------------------------------- reader mode ------------------------------ */
+
+function sanitize(container, baseUrl) {
+  container
+    .querySelectorAll("script, iframe, object, embed, form, link, style, noscript, video, audio")
+    .forEach((n) => n.remove());
+  container.querySelectorAll("*").forEach((el) => {
+    [...el.attributes].forEach((at) => {
+      if (/^on/i.test(at.name)) el.removeAttribute(at.name);
+    });
+  });
+  container.querySelectorAll("img").forEach((img) => {
+    try {
+      img.src = new URL(img.getAttribute("src") || "", baseUrl).href;
+    } catch {
+      img.remove();
+      return;
     }
-    el.textContent = s + " ";
-    container.appendChild(el);
-  }
-  if (bestEl) setTimeout(() => bestEl.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    img.removeAttribute("srcset");
+    img.loading = "lazy";
+  });
+  container.querySelectorAll("a").forEach((a) => {
+    const href = a.getAttribute("href") || "";
+    if (/^javascript:/i.test(href)) return a.removeAttribute("href");
+    try {
+      a.href = new URL(href, baseUrl).href;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+    } catch {}
+  });
 }
 
-function openOriginal() {
-  if (!currentBest) return;
-  let url = currentBest.url;
-  if (currentBest.sentence) {
-    const fragment = encodeURIComponent(currentBest.sentence.slice(0, 90).trim())
-      .replace(/-/g, "%2D");
-    url = url.split("#")[0] + "#:~:text=" + fragment;
-  }
-  chrome.tabs.create({ url });
+function highlightBlocks(container, claim) {
+  const claimTokens = tokenize(claim);
+  if (!claimTokens.size) return null;
+  const blocks = [...container.querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td")]
+    .filter((el) => el.textContent.trim().length > 30)
+    .map((el) => ({ el, sc: score(claimTokens, tokenize(el.textContent)) }));
+  const best = blocks.reduce((m, x) => (x.sc > (m?.sc ?? 0) ? x : m), null);
+  if (!best || best.sc < 0.3) return null;
+  blocks.forEach(({ el, sc }) => {
+    if (sc >= 0.3 && el !== best.el) el.classList.add("cl-block");
+  });
+  best.el.classList.add("cl-block-best");
+  return best;
 }
-$("openOriginal").addEventListener("click", openOriginal);
 
-async function handle(pending) {
+async function renderReader(pending) {
+  $("frame").hidden = true;
+  $("frame").src = "about:blank";
+  const container = $("content");
+  container.hidden = false;
+  container.textContent = "";
+  setBadge(null);
+  setStatus('<p class="empty">Fetching & extracting…</p>');
+
+  try {
+    let article = readerCache.url === pending.url ? readerCache.article : null;
+    if (!article) {
+      const res = await fetch(pending.url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      article = new Readability(doc).parse();
+      if (!article?.content?.trim()) throw new Error("empty");
+      readerCache = { url: pending.url, article };
+    }
+    setStatus("");
+    showMeta(article.title || hostnameOf(pending.url), pending.url);
+
+    const tpl = document.createElement("template");
+    tpl.innerHTML = article.content;
+    sanitize(tpl.content, pending.url);
+    container.appendChild(tpl.content);
+
+    const best = highlightBlocks(container, pending.claim || "");
+    if (best) {
+      setBadge(best.sc >= 0.6 ? "strong match found" : "close match found");
+      setTimeout(() => best.el.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    } else {
+      setBadge("no clear match in article", "warn");
+    }
+  } catch {
+    setStatus(
+      '<p class="error">Couldn\'t fetch or extract this page (paywall, bot protection, or dynamic content). Try Original view or open it in a new tab.</p>'
+    );
+    showMeta(hostnameOf(pending.url), pending.url);
+  }
+}
+
+/* --------------------------------- routing -------------------------------- */
+
+function renderCurrent() {
+  if (!pendingNow) return;
+  syncToggle();
+  if (mode === "original") renderOriginal(pendingNow);
+  else renderReader(pendingNow);
+}
+
+function handle(pending) {
   if (!pending?.url) return;
-  currentBest = { sentence: null, url: pending.url };
-
+  pendingNow = pending;
   $("claimCard").hidden = !pending.claim;
   $("claimText").textContent = pending.claim;
   $("sourceMeta").hidden = true;
-  $("matchBadge").hidden = true;
-  $("content").textContent = "";
-  setStatus('<p class="empty">Fetching source…</p>');
-
-  try {
-    const res = await fetch(pending.url, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const html = await res.text();
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const article = new Readability(doc).parse();
-    if (!article?.textContent?.trim()) throw new Error("empty");
-    setStatus("");
-    render(article, pending.claim || "", pending.url);
-  } catch {
-    setStatus(
-      '<p class="error">Couldn\'t fetch or extract this page (paywall, bot protection, or dynamic content).</p>'
-    );
-    $("sourceMeta").hidden = false;
-    $("sourceTitle").textContent = new URL(pending.url).hostname;
-    $("sourceUrl").textContent = pending.url;
-    $("sourceUrl").href = pending.url;
-    $("openOriginal").textContent = "Open original ↗";
-  }
+  renderCurrent();
 }
 
-chrome.storage.session.get("pending").then(({ pending }) => handle(pending));
+$("modeOriginal").addEventListener("click", () => {
+  mode = "original";
+  chrome.storage.local.set({ mode });
+  renderCurrent();
+});
+$("modeReader").addEventListener("click", () => {
+  mode = "reader";
+  chrome.storage.local.set({ mode });
+  renderCurrent();
+});
+
+$("openOriginal").addEventListener("click", () => {
+  if (pendingNow) chrome.tabs.create({ url: pendingNow.url });
+});
+
+chrome.storage.local.get("mode").then(({ mode: m }) => {
+  if (m === "reader" || m === "original") mode = m;
+  chrome.storage.session.get("pending").then(({ pending }) => handle(pending));
+});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.pending) handle(changes.pending.newValue);
 });

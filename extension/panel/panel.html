@@ -9,6 +9,11 @@
   <header>
     <span class="logo">◎ CiteLens</span>
     <span id="matchBadge" class="badge" hidden></span>
+    <span class="spacer"></span>
+    <div class="toggle" id="modeToggle" hidden>
+      <button id="modeOriginal" type="button">Original</button>
+      <button id="modeReader" type="button">Reader</button>
+    </div>
   </header>
 
   <section id="claimCard" hidden>
@@ -26,10 +31,13 @@
   <section id="sourceMeta" hidden>
     <p id="sourceTitle"></p>
     <a id="sourceUrl" target="_blank" rel="noreferrer"></a>
-    <button id="openOriginal" type="button">Open original with highlight ↗</button>
+    <button id="openOriginal" type="button">Open in new tab with highlight ↗</button>
   </section>
 
-  <article id="content"></article>
+  <div id="viewer">
+    <iframe id="frame" hidden sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
+    <article id="content" hidden></article>
+  </div>
 
   <script src="../vendor/readability.js"></script>
   <script src="panel.js"></script>
