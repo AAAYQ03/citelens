@@ -232,7 +232,9 @@ async function analyze() {
         return true;
       })
       .map((e) => ({ ...e, label: normWs(e.label || "").slice(0, 6) || "证据" }))
-      .slice(0, 5);
+      .slice(0, 5)
+      // Present evidence in the order it appears in the source, not model order.
+      .sort((a, b) => nx.indexOf(normWs(a.quote)) - nx.indexOf(normWs(b.quote)));
     analysisCache = { key: cacheKey(pendingNow), data: parsed };
     renderAnalysis(parsed);
     chrome.storage.session.set({
