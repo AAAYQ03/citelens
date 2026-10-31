@@ -166,6 +166,34 @@ async function fetchConversationCitations() {
       return out;
     };
 
+    // Pass 1 — a global pointer table: pill refs store pointers like
+    // "turn0search3" whose URLs live in search_result_groups entries
+    // (sometimes on the tool message, not the assistant one).
+    const ptrMap = {};
+    for (const node of Object.values(convo.mapping)) {
+      const md = node?.message?.metadata || {};
+      for (const g of md.search_result_groups || []) {
+        for (const e of g?.entries || []) {
+          if (!e?.url) continue;
+          if (typeof e.ref_id === "string") ptrMap[e.ref_id] = e.url;
+          else if (e.ref_id && typeof e.ref_id === "object") {
+            const { turn_index, ref_type, ref_index } = e.ref_id;
+            if (ref_type != null && ref_index != null) {
+              ptrMap["turn" + (turn_index ?? 0) + ref_type + ref_index] = e.url;
+            }
+          }
+        }
+      }
+    }
+
+    const resolvePointers = (list) =>
+      [...new Set(
+        (Array.isArray(list) ? list : [])
+          .map((p) => (typeof p === "string" ? ptrMap[p] : null))
+          .filter(Boolean)
+          .filter(isExternal)
+      )];
+
     const byMessage = {};
     const allUrls = [];
     for (const node of Object.values(convo.mapping)) {
@@ -184,8 +212,15 @@ async function fetchConversationCitations() {
         .concat(Array.isArray(md.citations) ? md.citations : []);
       for (const ref of sources) {
         if (ref?.type && SKIP_REF_TYPES.has(ref.type)) continue;
-        const urls = [...new Set(deepUrls(ref).filter(isExternal))];
+        let urls = [...new Set(deepUrls(ref).filter(isExternal))];
+        if (!urls.length) urls = resolvePointers(ref.refs);
         if (!urls.length) continue;
+        if (ref?.type === "sources_footnote") {
+          // The all-sources footer lists everything; it is pool material,
+          // never a per-pill anchor (it broke pill-order mapping before).
+          urls.forEach(addPool);
+          continue;
+        }
         refs.push({
           urls,
           matched: String(ref.matched_text || ref.text || "").replace(/\s+/g, " ").trim(),
@@ -205,7 +240,10 @@ async function fetchConversationCitations() {
     }
     convoCache = { id: convId, at: Date.now(), byMessage, allUrls };
     const nRefs = Object.values(byMessage).reduce((s, e) => s + e.refs.length, 0);
-    console.info("[CiteLens] conversation API:", nRefs, "citation refs in", Object.keys(byMessage).length, "messages,", allUrls.length, "urls");
+    console.info(
+      "[CiteLens] conversation API:", nRefs, "pill refs in", Object.keys(byMessage).length,
+      "messages,", allUrls.length, "urls,", Object.keys(ptrMap).length, "search pointers"
+    );
     return convoCache;
   } catch (e) {
     console.warn("[CiteLens] conversation API failed:", e?.message || e);
