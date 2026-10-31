@@ -92,12 +92,20 @@ function pillsOf(msgEl) {
   return [...msgEl.querySelectorAll("[data-pill]")].filter((p) => p.closest(PILL_TRIGGER));
 }
 
+const PILL_CACHE_V = "3";
+
 function cachedPillUrls(pill) {
   try {
+    if (pill.dataset.citelensUrlsV !== PILL_CACHE_V) return [];
     return JSON.parse(pill.dataset.citelensUrls || "[]");
   } catch {
     return [];
   }
+}
+
+function cachePillUrls(pill, urls) {
+  pill.dataset.citelensUrls = JSON.stringify(urls);
+  pill.dataset.citelensUrlsV = PILL_CACHE_V;
 }
 
 function waitFor(fn, timeout) {
@@ -203,10 +211,26 @@ async function harvestPill(pill) {
 
   const data = await fetchConversationCitations();
   if (data) {
-    const msgEl = pill.closest("[data-dil-message-id]");
-    const apiId = msgEl?.getAttribute("data-dil-message-id");
-    // DOM message id === API message id, so pills only ever resolve against
-    // their own message's citations, in start_idx order.
+    // The page scatters several near-identical uuids; walk the ancestors and
+    // use whichever one actually exists as a message id in the API data.
+    const ID_ATTRS = ["data-dil-message-id", "data-chatgpt-selection-message-id", "data-dil-source-message-id"];
+    const candidates = new Set();
+    for (let el = pill; el && el !== document.body; el = el.parentElement) {
+      for (const a of ID_ATTRS) {
+        const v = el.getAttribute?.(a);
+        if (v) candidates.add(v);
+      }
+    }
+    let apiId = [...candidates].find((id) => data.byMessage[id]) || null;
+    const msgIdsWithRefs = Object.keys(data.byMessage);
+    if (!apiId && msgIdsWithRefs.length === 1) {
+      // Single cited message in the conversation — no ambiguity to resolve.
+      apiId = msgIdsWithRefs[0];
+      console.info("[CiteLens] DOM ids", [...candidates], "not in API; using the only cited message", apiId);
+    } else if (!apiId) {
+      console.warn("[CiteLens] DOM ids", [...candidates], "not found among API messages", msgIdsWithRefs);
+    }
+    const msgEl = pill.closest(ID_ATTRS.map((a) => "[" + a + "]").join(", "));
     const msgRefs = (apiId && data.byMessage[apiId]) || [];
     const block = pill.closest("p, li, td, blockquote, h1, h2, h3, div");
     const blockText = (block?.innerText || "").replace(/\s+/g, " ").trim();
@@ -229,7 +253,7 @@ async function harvestPill(pill) {
     }
     urls = urls.slice(0, 5);
     if (urls.length) {
-      pill.dataset.citelensUrls = JSON.stringify(urls);
+      cachePillUrls(pill, urls);
       console.info("[CiteLens] pill harvest (API via " + via + "):", urls);
       return urls;
     }
@@ -263,7 +287,7 @@ async function harvestPill(pill) {
     console.warn("[CiteLens] hover produced no new external links for this pill");
   }
   console.info("[CiteLens] pill harvest:", urls);
-  if (urls.length) pill.dataset.citelensUrls = JSON.stringify(urls);
+  if (urls.length) cachePillUrls(pill, urls);
   return urls;
 }
 
