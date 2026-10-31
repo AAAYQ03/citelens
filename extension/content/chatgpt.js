@@ -16,6 +16,7 @@ const MIN_MESSAGE_CHARS = 80; // guards against matching tiny label elements
 const OWN_HOSTS = ["chatgpt.com", "chat.openai.com"];
 let msgSeq = 0;
 let activeSelector = null;
+let emptyScans = 0;
 
 function assistantMessages() {
   for (const sel of MESSAGE_SELECTORS) {
@@ -26,6 +27,7 @@ function assistantMessages() {
       continue;
     }
     if (els.length) {
+      emptyScans = 0;
       if (activeSelector !== sel) {
         activeSelector = sel;
         console.info("[CiteLens] assistant messages matched by:", sel, "count:", els.length);
@@ -38,11 +40,14 @@ function assistantMessages() {
       });
     }
   }
-  if (activeSelector !== "none") {
+  // An empty page or a still-streaming answer legitimately matches nothing;
+  // only treat persistent misses on a conversation page as real breakage.
+  emptyScans++;
+  if (activeSelector !== "none" && emptyScans >= 5 && /^\/c\//.test(location.pathname)) {
     activeSelector = "none";
     console.warn(
-      "[CiteLens] no assistant messages matched — ChatGPT's DOM changed. " +
-        "Update MESSAGE_SELECTORS in content/chatgpt.js."
+      "[CiteLens] no assistant messages matched after repeated scans — ChatGPT's DOM " +
+        "may have changed. Update MESSAGE_SELECTORS in content/chatgpt.js."
     );
   }
   return [];
