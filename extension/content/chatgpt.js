@@ -257,7 +257,7 @@ async function fetchConversationCitations() {
     const nRefs = Object.values(byMessage).reduce((s, e) => s + e.refs.length, 0);
     console.info(
       "[CiteLens] conversation API:", nRefs, "pill refs in", Object.keys(byMessage).length,
-      "messages,", allUrls.length, "urls,", Object.keys(ptrMap).length, "search pointers"
+      "messages,", allUrls.length, "urls,", Object.keys(globalIdx).length, "search index entries"
     );
     return convoCache;
   } catch (e) {
