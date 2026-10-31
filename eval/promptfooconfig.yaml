@@ -1,0 +1,23 @@
+# CiteLens analysis-quality eval.
+# Run:  ANTHROPIC_API_KEY=sk-ant-... npx promptfoo@latest eval -c eval/promptfooconfig.yaml
+# View: npx promptfoo@latest view
+description: CiteLens citation-analysis quality (anchor rate, verbatim rate, stance correctness)
+
+prompts:
+  - file://prompts/analyze.js
+
+providers:
+  - id: anthropic:messages:claude-sonnet-5
+    config: { max_tokens: 4000 }
+  - id: anthropic:messages:claude-haiku-4-5
+    config: { max_tokens: 4000 }
+
+defaultTest:
+  options:
+    # grader for llm-rubric assertions
+    provider: anthropic:messages:claude-sonnet-5
+  assert:
+    - type: javascript
+      value: file://asserts/quality.js
+
+tests: file://dataset/cases.yaml

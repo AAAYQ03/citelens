@@ -1,0 +1,171 @@
+# Seed eval set (12 cases). Grow it with the ⤓ case button in the panel:
+# every real analysis can be captured, human-labeled, and pasted here.
+# stance labels: supported | overstated | contradicted | not_addressed
+
+- description: "en/en supported — research summary"
+  vars:
+    stance: supported
+    claim: "Deep sleep plays an active role in consolidating new memories."
+    source: |
+      Sleep and memory: what three decades of experiments show. During slow-wave sleep,
+      the hippocampus repeatedly replays neural firing patterns that were first recorded
+      during learning. In controlled studies, participants who slept after memorizing word
+      pairs retained significantly more items than participants who stayed awake for the
+      same interval. Researchers therefore describe slow-wave sleep as an active
+      consolidation process rather than passive protection from interference. The effect
+      is strongest for declarative memory, while procedural skills appear to benefit more
+      from stage-2 sleep spindles.
+
+- description: "zh claim / en source supported — agent architecture blog"
+  vars:
+    stance: supported
+    claim: "2026 年的主流实践是先从单一 Agent 循环做起，只有在确有需要时才引入多 Agent。"
+    source: |
+      Choosing an agent architecture in 2026. Default to a single loop: one model, a set
+      of tools, iterate until done. Current frontier models sustain long multi-step tool
+      use without the scaffolding that motivated earlier frameworks. Reach for subagents
+      only when you need context isolation or real parallelism. Every layer you add costs
+      debuggability, and debuggability is the scarcest resource in agentic systems. Teams
+      that started with orchestration graphs report spending most of their time debugging
+      the graph rather than improving the agent.
+
+- description: "zh/zh supported — 新闻稿"
+  vars:
+    stance: supported
+    claim: "该市今年前三季度新能源汽车销量同比增长超过四成。"
+    source: |
+      本报讯：市统计局周四发布数据，今年1至9月全市新能源汽车累计销量为18.6万辆，
+      同比增长43.2%，增速较去年同期提高11个百分点。其中纯电动车型占比约七成，
+      插电混动车型增长最快，同比增幅达到68%。统计局分析认为，充电基础设施加密
+      与置换补贴政策是主要拉动因素。全市充电桩保有量已达到12.4万个，车桩比降至
+      2.1:1。业内人士提醒，四季度补贴政策到期前可能出现集中购车，透支部分明年需求。
+
+- description: "en marketing supported — div-heavy product page tone"
+  vars:
+    stance: supported
+    claim: "The vendor states the platform is SOC 2 Type II certified and commits to 99.95% uptime."
+    source: |
+      Enterprise-grade by default. Your data, protected. Acme Workflow Cloud is SOC 2
+      Type II certified, with annual third-party penetration testing and regional data
+      residency in the US and EU. Always on, always fast. We back every enterprise plan
+      with a 99.95% uptime SLA and 24/7 follow-the-sun support. Trusted by 4,000+
+      companies. From startups to the Fortune 500, teams run their critical automations
+      on Acme. Start free, scale when ready.
+
+- description: "en overstated — most vs all"
+  vars:
+    stance: overstated
+    min_evidence: 1
+    claim: "The study found that all participants improved their test scores after the training program."
+    source: |
+      Results of the eight-week cohort study. Of the 142 participants who completed the
+      program, 103 (72.5%) improved their post-test scores relative to baseline, 24 showed
+      no measurable change, and 15 scored lower. Improvement was concentrated among
+      participants who attended at least six of the eight sessions. The authors caution
+      that attrition was non-random: participants who dropped out had lower baseline
+      scores, which may inflate the apparent effect.
+  assert:
+    - type: llm-rubric
+      value: "The reasoning must point out that the claim overstates the source: the source says 72.5% (most) of participants improved, not all of them. A response that presents the claim as fully supported fails."
+
+- description: "zh claim / en source overstated — 比例被放大"
+  vars:
+    stance: overstated
+    min_evidence: 1
+    claim: "调查显示所有受访企业都已在生产环境部署了 AI 代码助手。"
+    source: |
+      State of AI tooling survey, n=1,204 engineering organizations. 61% of surveyed
+      firms report that AI coding assistants are deployed in production development
+      workflows, up from 34% a year earlier. A further 22% are running limited pilots,
+      while 17% report no current deployment, citing security review (41%) and licensing
+      cost (28%) as the main blockers. Deployment correlates strongly with company size:
+      among firms over 5,000 engineers, production use reaches 83%.
+  assert:
+    - type: llm-rubric
+      value: "The reasoning must point out that the claim overstates the source: only 61% of surveyed firms (not all) have deployed AI coding assistants in production. A response presenting the claim as fully supported fails."
+
+- description: "en contradicted — direction reversed"
+  vars:
+    stance: contradicted
+    min_evidence: 1
+    claim: "Habitual coffee consumption increases the risk of developing type 2 diabetes."
+    source: |
+      Meta-analysis of 30 prospective cohort studies covering 1.1 million participants.
+      Habitual coffee consumption was consistently associated with a LOWER risk of
+      developing type 2 diabetes: each additional daily cup corresponded to a 6%
+      reduction in relative risk. The association held for both caffeinated and
+      decaffeinated coffee. The authors note the evidence is observational and cannot
+      establish causation, and that added sugar may offset the association.
+  assert:
+    - type: llm-rubric
+      value: "The reasoning must state that the source CONTRADICTS the claim: the source reports coffee is associated with LOWER diabetes risk, not higher. A response presenting the claim as supported fails."
+
+- description: "zh/zh contradicted — 政策方向相反"
+  vars:
+    stance: contradicted
+    min_evidence: 1
+    claim: "财政部宣布明年起取消新能源汽车购置补贴。"
+    source: |
+      财政部等四部门今日联合发文，明确现行新能源汽车购置补贴政策将延长执行至后年
+      年底，补贴标准在现行基础上退坡10%。通知同时要求各地不得提前退出或擅自加码，
+      保持政策连续性稳定性。文件强调，延长补贴旨在平滑市场过渡，为产业链企业提供
+      明确预期，后续将综合评估市场情况再研究退出安排。
+  assert:
+    - type: llm-rubric
+      value: "推理必须指出来源与主张相反：来源说补贴延长执行（退坡10%），而不是取消。把主张当作被支持的回答判为不通过。"
+
+- description: "en not_addressed — source on a different subtopic"
+  vars:
+    stance: not_addressed
+    min_evidence: 1
+    claim: "The framework's commercial license costs $99 per developer per year."
+    source: |
+      Release notes, version 4.0. This release introduces incremental compilation,
+      cutting cold build times by roughly 60% on large monorepos. The plugin API has
+      been stabilized, and the legacy configuration format is deprecated with a
+      migration codemod provided. Windows ARM64 is now a first-class build target.
+      Breaking changes are limited to the plugin hook signatures; see the migration
+      guide for the full list. Community contributions made up 40% of this release.
+  assert:
+    - type: llm-rubric
+      value: "The reasoning must state that the source never discusses pricing or licensing costs, so the claim is not addressed by this source. A response inventing support fails."
+
+- description: "zh claim / en source not_addressed"
+  vars:
+    stance: not_addressed
+    min_evidence: 1
+    claim: "该报告预测明年全球智能手机出货量将下降5%。"
+    source: |
+      Global tablet market report, Q3. Worldwide tablet shipments reached 38.2 million
+      units in the third quarter, up 4.1% year over year, driven by education sector
+      refresh cycles in Southeast Asia and new mid-range launches. The top five vendors
+      accounted for 71% of shipments. Detachable form factors continue to take share
+      from slates. The report's forecast section covers tablets only and projects flat
+      tablet shipments for the next calendar year.
+  assert:
+    - type: llm-rubric
+      value: "推理必须指出来源只讨论平板电脑市场、未涉及智能手机出货量预测，因此该主张在此来源中没有依据。编造支持关系判为不通过。"
+
+- description: "en data-heavy supported — numbers must anchor"
+  vars:
+    stance: supported
+    claim: "Remote-first companies in the survey reported a median time-to-hire of 34 days, nine days faster than office-first companies."
+    source: |
+      Hiring benchmarks, annual survey of 2,300 companies. Median time-to-hire across
+      all respondents was 39 days. Remote-first companies reported a median time-to-hire
+      of 34 days, compared with 43 days for office-first companies — a nine-day gap that
+      has widened for three consecutive years. Offer-acceptance rates were also higher
+      at remote-first firms (89% vs 81%). The survey covers roles in engineering,
+      design, and go-to-market functions across North America and Europe.
+
+- description: "zh claim / en technical docs supported"
+  vars:
+    stance: supported
+    claim: "该 API 免费层每分钟最多允许 60 次请求，超限会返回 429 状态码。"
+    source: |
+      Rate limits. The free tier allows up to 60 requests per minute per API key.
+      Requests beyond the limit receive an HTTP 429 response with a Retry-After header
+      indicating when to retry. Paid tiers raise the limit to 600 requests per minute,
+      and burst capacity of up to 2x is available for short spikes. Rate limits are
+      enforced per key, not per IP. Websocket connections are limited separately at
+      10 concurrent connections on the free tier.

@@ -1,8 +1,9 @@
 // CiteLens side panel — the source page is the main stage.
 // The real page is embedded in an iframe (a per-URL DNR session rule strips
-// anti-embedding response headers). Analyze: one Haiku call explains WHY the
-// source supports the claim; evidence quotes are validated verbatim and
-// annotated into the page by the injected highlighter.
+// anti-embedding response headers). Analyze: one LLM call (model selectable
+// in settings) explains WHY the source supports the claim; evidence quotes are
+// validated verbatim (see core/verify.js) and annotated into the page by the
+// injected highlighter.
 
 const $ = (id) => document.getElementById(id);
 const DNR_RULE_ID = 7001;
@@ -11,20 +12,7 @@ let pendingNow = null;
 let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
 
-/* ----------------------------- text matching ----------------------------- */
-
-function tokenize(s) {
-  return new Set(
-    s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter((w) => w.length > 2)
-  );
-}
-function score(a, b) {
-  if (!a.size || !b.size) return 0;
-  let inter = 0;
-  for (const w of a) if (b.has(w)) inter++;
-  return inter / Math.min(a.size, b.size);
-}
-const normWs = (s) => s.replace(/\s+/g, " ").trim();
+const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence } = window.CiteLensCore;
 
 /* --------------------------------- UI bits -------------------------------- */
 
@@ -104,48 +92,6 @@ async function renderPage(pending) {
 
 const cacheKey = (p) => p.url + "||" + p.claim;
 
-function relevantExcerpt(text, claim) {
-  if (text.length <= 12000) return text;
-  const sentences = text.split(/(?<=[.!?。！？])\s+|\n+/u).filter((s) => s.trim().length > 0);
-  const claimTokens = tokenize(claim);
-  let best = null;
-  for (const s of sentences) {
-    const sc = score(claimTokens, tokenize(s));
-    if (!best || sc > best.sc) best = { s, sc };
-  }
-  if (best && best.sc >= 0.25) {
-    const i = text.indexOf(best.s);
-    if (i >= 0) return text.slice(Math.max(0, i - 6000), i + best.s.length + 6000);
-  }
-  return text.slice(0, 12000);
-}
-
-function buildPrompt(claim, excerpt) {
-  return (
-    "You are a citation-verification assistant. Given a CLAIM from an AI chat answer and an " +
-    "EXCERPT of the source it cites, analyze how (and whether) the source supports the claim.\n\n" +
-    "Return ONLY valid JSON, no markdown fences:\n" +
-    "{\n" +
-    ' "reasoning": "2-3 sentences explaining the logical chain from source to claim. Write in the same language as the CLAIM.",\n' +
-    ' "evidence": [\n' +
-    '  { "quote": "EXACT verbatim substring copied character-for-character from the EXCERPT (keep its original language)",\n' +
-    '    "label": "a 2-4 character category label in the language of the CLAIM, describing what KIND of content this passage is",\n' +
-    '    "note": "one short sentence: why this passage matters for the claim, in the language of the CLAIM" }\n' +
-    " ]\n" +
-    "}\n" +
-    "Label guidance: pick whatever fits THIS article's genre — common ones include " +
-    "原理/推导/结论/数据/示例/条件/背景/观点 (or Principle/Reasoning/Conclusion/Data/Example/Condition for English claims), " +
-    "but invent a better short label if none fit. Never force a category that does not match the text.\n" +
-    "Rules: 2-5 evidence items, each anchored to a DIFFERENT passage (no overlapping quotes). " +
-    "When the same idea appears in BOTH an intro/summary paragraph and a detailed section below, " +
-    "quote the DETAILED section, not the summary. " +
-    "Quotes MUST be exact substrings of the EXCERPT (validated programmatically; paraphrases are discarded). " +
-    "Each quote must be ONE sentence or clause, at most ~40 words / 100 characters — never a whole paragraph. " +
-    "If the source does not actually support the claim, say so plainly in the reasoning and cite what it actually says.\n\n" +
-    "CLAIM:\n" + claim + "\n\nEXCERPT:\n" + excerpt
-  );
-}
-
 const liveTextWaiters = new Map();
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "pageText" && liveTextWaiters.has(msg.url)) {
@@ -153,6 +99,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     liveTextWaiters.delete(msg.url);
   }
   if (msg?.type === "analysisApplied" && pendingNow) {
+    updateLastMetricLocated(msg.count);
     if (msg.count === 0 && msg.total > 0) {
       setStatus('<p class="error">未能在页面中定位证据 — 试试在新标签页打开 ↗</p>');
     } else if (msg.total > 0) {
@@ -198,6 +145,8 @@ async function analyze() {
   }
   btn.disabled = true;
   btn.textContent = "Analyzing…";
+  const model = analysisModel || "claude-sonnet-5";
+  const t0 = performance.now();
   try {
     const excerpt = relevantExcerpt(await getSourceText(), pendingNow.claim);
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -209,33 +158,18 @@ async function analyze() {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: analysisModel || "claude-sonnet-5",
+        model,
         max_tokens: 4000,
         messages: [{ role: "user", content: buildPrompt(pendingNow.claim, excerpt) }],
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error?.message || "API error");
-    const raw = ((data.content || []).find((b) => b.type === "text")?.text || "")
-      .replace(/^```(json)?|```$/g, "")
-      .trim();
-    const parsed = JSON.parse(raw);
-    const nx = normWs(excerpt);
-    const seen = new Set();
-    parsed.evidence = (parsed.evidence || [])
-      .filter((e) => {
-        if (!e?.quote || normWs(e.quote).length > 300) return false;
-        if (!nx.includes(normWs(e.quote))) return false;
-        const k = normWs(e.quote);
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      })
-      .map((e) => ({ ...e, label: normWs(e.label || "").slice(0, 6) || "证据" }))
-      .slice(0, 5)
-      // Present evidence in the order it appears in the source, not model order.
-      .sort((a, b) => nx.indexOf(normWs(a.quote)) - nx.indexOf(normWs(b.quote)));
-    analysisCache = { key: cacheKey(pendingNow), data: parsed };
+    const raw = (data.content || []).find((b) => b.type === "text")?.text || "";
+    const parsed = parseAnalysis(raw);
+    parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+    analysisCache = { key: cacheKey(pendingNow), data: parsed, excerpt, model };
+    recordMetric({ ts: Date.now(), model, ms: Math.round(performance.now() - t0), total: parsed.evidence.length });
     renderAnalysis(parsed);
     chrome.storage.session.set({
       analysis: { url: pendingNow.url, evidence: parsed.evidence, ts: Date.now() },
@@ -246,6 +180,40 @@ async function analyze() {
     btn.disabled = false;
     btn.textContent = "Analyze";
   }
+}
+
+async function recordMetric(m) {
+  try {
+    const { metrics = [] } = await chrome.storage.local.get("metrics");
+    metrics.push(m);
+    await chrome.storage.local.set({ metrics: metrics.slice(-200) });
+    renderMetrics(metrics);
+  } catch {}
+}
+
+async function updateLastMetricLocated(count) {
+  try {
+    const { metrics = [] } = await chrome.storage.local.get("metrics");
+    if (metrics.length) {
+      metrics[metrics.length - 1].located = count;
+      await chrome.storage.local.set({ metrics });
+      renderMetrics(metrics);
+    }
+  } catch {}
+}
+
+function renderMetrics(metrics) {
+  const el = $("metricsLine");
+  if (!el || !metrics.length) return;
+  const avgMs = metrics.reduce((s, m) => s + (m.ms || 0), 0) / metrics.length;
+  const withLoc = metrics.filter((m) => m.total > 0 && m.located !== undefined);
+  const locRate = withLoc.length
+    ? withLoc.reduce((s, m) => s + m.located / m.total, 0) / withLoc.length
+    : null;
+  el.hidden = false;
+  el.textContent =
+    `${metrics.length} analyses · avg ${(avgMs / 1000).toFixed(1)}s` +
+    (locRate !== null ? ` · locate rate ${Math.round(locRate * 100)}%` : "");
 }
 
 function focusEvidence(ev) {
@@ -291,6 +259,24 @@ $("openOriginal").addEventListener("click", () => {
 });
 $("analyzeBtn").addEventListener("click", analyze);
 $("claimText").addEventListener("click", () => $("claimText").classList.toggle("clamped"));
+$("captureBtn").addEventListener("click", async () => {
+  if (!analysisCache.data) return;
+  const kase = {
+    id: "case-" + Date.now(),
+    captured_at: new Date().toISOString(),
+    claim: pendingNow?.claim || "",
+    source_url: pendingNow?.url || "",
+    source_excerpt: analysisCache.excerpt || "",
+    model: analysisCache.model || "",
+    model_output: analysisCache.data,
+    human: { stance: "TODO: supported | overstated | contradicted | not_addressed", notes: "" },
+  };
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(kase, null, 2));
+    setStatus('<p class="hint">Eval case copied — paste it into eval/dataset/ and fill the human stance label.</p>');
+    setTimeout(() => setStatus(""), 3000);
+  } catch {}
+});
 $("expandBtn").addEventListener("click", () => {
   $("reasoningRow").hidden = !$("reasoningRow").hidden;
 });
@@ -307,6 +293,7 @@ $("keySave").addEventListener("click", async () => {
   setTimeout(() => setStatus(""), 1500);
 });
 
+chrome.storage.local.get("metrics").then(({ metrics = [] }) => renderMetrics(metrics));
 chrome.storage.local.get(["anthropicKey", "analysisModel"]).then(({ anthropicKey, analysisModel }) => {
   if (anthropicKey) $("keyInput").value = anthropicKey;
   if (analysisModel) $("modelSelect").value = analysisModel;

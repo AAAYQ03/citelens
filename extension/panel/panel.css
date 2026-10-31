@@ -135,3 +135,11 @@ header {
 #viewer { position: relative; flex: 1; min-height: 0; display: flex; }
 #frame { flex: 1; width: 100%; border: none; background: #fff; }
 #emptyHint { margin: auto; padding: 0 24px; color: #a8a29e; font-size: 13px; text-align: center; }
+
+#captureBtn {
+  flex-shrink: 0; border: none; background: transparent; color: #a8a29e;
+  font-size: 11px; cursor: pointer;
+}
+#captureBtn:hover { color: #4f46e5; }
+#settings .metrics { flex-basis: 100%; padding-top: 2px; }
+#settings { flex-wrap: wrap; }

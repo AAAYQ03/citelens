@@ -21,6 +21,7 @@
       <option value="claude-haiku-4-5">Haiku 4.5 · fastest (~$0.008)</option>
     </select>
     <button id="keySave" type="button" class="btn-primary">Save</button>
+    <span id="metricsLine" class="hint metrics" hidden></span>
   </section>
 
   <section id="srcbar" hidden>
@@ -38,6 +39,7 @@
   <section id="analysisStrip" hidden>
     <span id="chipRow"></span>
     <span class="spacer"></span>
+    <button id="captureBtn" type="button" title="Copy this analysis as an eval case">⤓ case</button>
     <button id="expandBtn" type="button" title="Show reasoning chain">▾ 推导</button>
   </section>
 
@@ -55,6 +57,7 @@
     </p>
   </div>
 
+  <script src="../core/verify.js"></script>
   <script src="../vendor/readability.js"></script>
   <script src="../content/annotate.js"></script>
   <script src="panel.js"></script>

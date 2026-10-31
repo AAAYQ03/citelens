@@ -62,6 +62,42 @@ listing: coming soon.
 CiteLens sits in the unclaimed middle: it doesn't replace your AI chat, it **overlays
 verification onto the one you already use**. Zero migration cost is the distribution thesis.
 
+## Quality: evals & metrics
+
+The analysis pipeline is eval-gated. `eval/` holds a labeled dataset (zh/en claims ×
+supported / overstated / contradicted / not_addressed sources) run through
+[promptfoo](https://promptfoo.dev) against the **exact prompt and validation code the
+extension ships** (`extension/core/verify.js`). Measured: JSON validity, verbatim-quote
+rate, evidence anchor count, stance correctness (llm-rubric), latency and cost per model
+— this is how the default model (Sonnet 5 over Haiku 4.5) is chosen with data rather
+than vibes. Deterministic core logic runs as unit tests in CI on every push; the model
+eval runs on demand. In the product itself, the north-star metric is instrumented
+locally: the panel shows analyses count, average latency, and evidence locate rate,
+stored only in `chrome.storage.local`. Every real analysis can be captured as a new
+eval case with one click (⤓). Details: [eval/README.md](eval/README.md).
+
+## Architecture decisions
+
+- **Verbatim-or-drop.** Model-returned quotes must be exact substrings of the page's
+  rendered text or they are discarded. Annotations can point at the wrong emphasis,
+  never at text that isn't there.
+- **Independent verifier.** The model that wrote the answer never grades itself: a
+  ChatGPT answer is analyzed by a Claude model. A neutral cross-model overlay is the
+  reason this exists as an extension rather than a feature of any one chatbot.
+- **No verdict grades.** An earlier version shipped ✅/⚠️/❌ verdicts and we removed
+  them: with frontier models most claims check out, so the grade carried little
+  information while inviting "LLM judges LLM" circularity. The product is the
+  derivation, not the judgment. (Planned: exception-only flags when a source
+  contradicts or never addresses a claim — signal only where the information is.)
+- **Deterministic control flow, bounded agency.** The core pipeline is a single LLM
+  call orchestrated by code — no agent framework, because the flow is fully
+  specifiable. Agentic control is reserved for the one step that needs it (planned:
+  finding sources for uncited claims), with a fixed tool set and call budget.
+- **Evaluated and rejected:** Chrome's built-in Gemini Nano as a zero-key local tier
+  (its Prompt API text output doesn't support Chinese — our primary content — and the
+  BYOK funnel doesn't exist for this product's audience); vector DB / RAG stack
+  (page-level excerpting suffices); LangGraph-style orchestration (see above).
+
 ## Roadmap
 
 - Whole-answer overview: analyze every citation in an answer in one pass
