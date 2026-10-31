@@ -79,10 +79,13 @@ const STANCE_FLAGS = {
   not_addressed: { text: "⚠ 来源未提及", cls: "citelens-flag-warn" },
 };
 
+const JUNK_HOSTS = ["images.openai.com", "files.openai.com", "oaistatic.com", "oaiusercontent.com"];
+
 function isExternal(href) {
   try {
     const host = new URL(href).hostname;
-    return !OWN_HOSTS.some((h) => host === h || host.endsWith("." + h));
+    const blocked = [...OWN_HOSTS, ...JUNK_HOSTS];
+    return !blocked.some((h) => host === h || host.endsWith("." + h));
   } catch {
     return false;
   }
@@ -140,36 +143,68 @@ async function fetchConversationCitations() {
       headers: { Authorization: "Bearer " + token },
     }).then((r) => (r.ok ? r.json() : null));
     if (!convo?.mapping) return null;
+    // Not citations: widgets, hidden safe_urls dumps, inline media.
+    const SKIP_REF_TYPES = new Set(["hidden", "client_defined_widget", "image_inline", "tldr", "video", "product", "products"]);
+
+    // Citation URLs appear under varying shapes (items[].url, sources[].url,
+    // metadata.url, ...) — collect any string under a url/href-named key,
+    // never from safe_urls (a message-level dump of every link incl. the
+    // user's own uploads).
+    const deepUrls = (obj, depth = 0, out = []) => {
+      if (!obj || depth > 4) return out;
+      if (Array.isArray(obj)) {
+        for (const v of obj) deepUrls(v, depth + 1, out);
+        return out;
+      }
+      if (typeof obj === "object") {
+        for (const [k, v] of Object.entries(obj)) {
+          if (k === "safe_urls") continue;
+          if (typeof v === "string" && /^https?:/.test(v) && /url|href/i.test(k)) out.push(v);
+          else if (v && typeof v === "object") deepUrls(v, depth + 1, out);
+        }
+      }
+      return out;
+    };
+
     const byMessage = {};
     const allUrls = [];
     for (const node of Object.values(convo.mapping)) {
       const msgId = node?.message?.id;
       const md = node?.message?.metadata || {};
-      const pools = []
+      const refs = [];
+      const pool = [];
+      const addPool = (u) => {
+        if (typeof u === "string" && /^https?:/.test(u) && isExternal(u)) {
+          if (!pool.includes(u)) pool.push(u);
+          if (!allUrls.includes(u)) allUrls.push(u);
+        }
+      };
+      const sources = []
         .concat(Array.isArray(md.content_references) ? md.content_references : [])
         .concat(Array.isArray(md.citations) ? md.citations : []);
-      for (const ref of pools) {
-        const urls = [];
-        const push = (u) => {
-          if (typeof u === "string" && /^https?:/.test(u) && isExternal(u) && !urls.includes(u)) urls.push(u);
-        };
-        push(ref.url);
-        push(ref.metadata?.url);
-        (ref.items || []).forEach((it) => push(it?.url));
-        (ref.safe_urls || []).forEach(push);
-        (ref.refs || []).forEach((r) => push(r?.url));
+      for (const ref of sources) {
+        if (ref?.type && SKIP_REF_TYPES.has(ref.type)) continue;
+        const urls = [...new Set(deepUrls(ref).filter(isExternal))];
         if (!urls.length) continue;
-        (byMessage[msgId] = byMessage[msgId] || []).push({
+        refs.push({
           urls,
           matched: String(ref.matched_text || ref.text || "").replace(/\s+/g, " ").trim(),
           start: ref.start_idx ?? ref.start_ix ?? 0,
         });
-        for (const u of urls) if (!allUrls.includes(u)) allUrls.push(u);
+        urls.forEach(addPool);
+      }
+      // search_result_groups = what the model's web search saw; low-confidence
+      // message-level fallback only, never used for per-pill ordering.
+      for (const g of md.search_result_groups || []) {
+        for (const e of g?.entries || []) addPool(e?.url);
+      }
+      if (refs.length || pool.length) {
+        refs.sort((a, b) => a.start - b.start);
+        byMessage[msgId] = { refs, pool };
       }
     }
-    for (const list of Object.values(byMessage)) list.sort((a, b) => a.start - b.start);
     convoCache = { id: convId, at: Date.now(), byMessage, allUrls };
-    const nRefs = Object.values(byMessage).reduce((s, l) => s + l.length, 0);
+    const nRefs = Object.values(byMessage).reduce((s, e) => s + e.refs.length, 0);
     console.info("[CiteLens] conversation API:", nRefs, "citation refs in", Object.keys(byMessage).length, "messages,", allUrls.length, "urls");
     return convoCache;
   } catch (e) {
@@ -222,7 +257,9 @@ async function harvestPill(pill) {
       }
     }
     let apiId = [...candidates].find((id) => data.byMessage[id]) || null;
-    const msgIdsWithRefs = Object.keys(data.byMessage);
+    const msgIdsWithRefs = Object.keys(data.byMessage).filter(
+      (id) => data.byMessage[id].refs.length || data.byMessage[id].pool.length
+    );
     if (!apiId && msgIdsWithRefs.length === 1) {
       // Single cited message in the conversation — no ambiguity to resolve.
       apiId = msgIdsWithRefs[0];
@@ -231,7 +268,8 @@ async function harvestPill(pill) {
       console.warn("[CiteLens] DOM ids", [...candidates], "not found among API messages", msgIdsWithRefs);
     }
     const msgEl = pill.closest(ID_ATTRS.map((a) => "[" + a + "]").join(", "));
-    const msgRefs = (apiId && data.byMessage[apiId]) || [];
+    const entry = (apiId && data.byMessage[apiId]) || { refs: [], pool: [] };
+    const msgRefs = entry.refs;
     const block = pill.closest("p, li, td, blockquote, h1, h2, h3, div");
     const blockText = (block?.innerText || "").replace(/\s+/g, " ").trim();
     let via = null;
@@ -247,8 +285,8 @@ async function harvestPill(pill) {
       }
     }
     let urls = ref?.urls || [];
-    if (!urls.length && msgRefs.length) {
-      urls = [...new Set(msgRefs.flatMap((r) => r.urls))];
+    if (!urls.length && (msgRefs.length || entry.pool.length)) {
+      urls = [...new Set([...msgRefs.flatMap((r) => r.urls), ...entry.pool])];
       via = "message pool";
     }
     urls = urls.slice(0, 5);
