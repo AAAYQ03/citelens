@@ -8,6 +8,10 @@ chrome.storage.session
   .catch(() => {});
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg?.type === "openPanel" && sender.tab?.id != null) {
+    // Fired synchronously on click, before any await, so the gesture is live.
+    chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => {});
+  }
   if (msg?.type === "openOverview" && sender.tab?.id != null) {
     chrome.storage.session.set({
       overviewRequest: { msgId: msg.msgId, text: msg.text, urls: msg.urls || [], ts: Date.now() },

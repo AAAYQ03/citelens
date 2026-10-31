@@ -132,7 +132,13 @@ async function harvestPill(pill) {
     urls = [...new Set(
       [...dlg.querySelectorAll('a[href^="http"]')].map((a) => a.href).filter(isExternal)
     )];
+    if (!urls.length) {
+      console.warn("[CiteLens] popover opened but held no external links:", dlg.outerHTML.slice(0, 600));
+    }
+  } else {
+    console.warn("[CiteLens] no popover with links appeared within 1.8s after clicking the pill trigger");
   }
+  console.info("[CiteLens] pill harvest:", urls);
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
   if (trigger.getAttribute("aria-expanded") === "true") trigger.click();
   if (urls.length) pill.dataset.citelensUrls = JSON.stringify(urls);
@@ -187,13 +193,18 @@ function decoratePill(pill) {
   btn.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
+    // Open the panel inside the live user gesture — awaiting the harvest
+    // first would expire the gesture and sidePanel.open() silently fails.
+    chrome.runtime.sendMessage({ type: "openPanel" });
     btn.textContent = "…";
     const urls = await harvestPill(pill);
-    btn.textContent = "◎";
     if (!urls.length) {
-      btn.title = "CiteLens: couldn't read this citation's URL from its popover";
+      btn.textContent = "✕";
+      btn.title = "CiteLens: couldn't read this citation's URL from its popover (see console)";
+      setTimeout(() => (btn.textContent = "◎"), 1500);
       return;
     }
+    btn.textContent = "◎";
     chrome.runtime.sendMessage({ type: "openSource", url: urls[0], claim: claimFor(anchorEl) });
   });
   anchorEl.insertAdjacentElement("afterend", btn);
