@@ -329,6 +329,32 @@ function hideTip() {
   if (t) t.hidden = true;
 }
 
+function colorizeSpans(spans, evidence) {
+  const nq = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+  return (spans || []).map((sp) => {
+    let linked = null;
+    const a = nq(sp.evidence_quote);
+    if (a) {
+      linked =
+        (evidence || []).find((ev) => {
+          const b = nq(ev.quote);
+          return b && (a === b || a.includes(b) || b.includes(a));
+        }) || null;
+    }
+    const meta = SPAN_TYPES[sp.type] || {};
+    return {
+      ...sp,
+      linkedLabel: linked?.label || null,
+      flagged: !!meta.flag,
+      color: linked
+        ? window.CiteLensAnnotate.colorFor(linked.label)
+        : sp.evidence_quote
+          ? "#6366f1"
+          : "#9ca3af",
+    };
+  });
+}
+
 function renderClaimSpans(spans) {
   const el = $("claimText");
   if (!spans?.length || !pendingNow?.claim) return;
@@ -342,14 +368,21 @@ function renderClaimSpans(spans) {
     const meta = SPAN_TYPES[sp.type] || {};
     const node = document.createElement("span");
     node.textContent = text.slice(sp.pos, sp.pos + sp.text.length);
-    node.style.background = (meta.color || "#64748b") + "33";
-    // solid underline = anchored to a verified source quote (clickable);
-    // dashed = no anchor, nothing to jump to.
-    node.style.borderBottom =
-      (sp.evidence_quote ? "2px solid " : "2px dashed ") + (meta.color || "#64748b");
+    // color = which evidence chain this segment belongs to (matches the chip
+    // and the source highlight); decoration = anchored or not; ⚠ = the
+    // transformation itself is an exception type.
+    node.style.background = sp.color + "30";
+    node.style.borderBottom = (sp.evidence_quote ? "2px solid " : "2px dashed ") + sp.color;
     node.style.cursor = sp.evidence_quote ? "pointer" : "default";
+    if (sp.flagged) {
+      const warn = document.createElement("sup");
+      warn.textContent = "⚠";
+      warn.style.cssText = "font-size:9px;color:#b45309;margin-left:1px;";
+      node.appendChild(warn);
+    }
     const tip =
       (meta.zh || sp.type) +
+      (sp.linkedLabel ? " ← 对应「" + sp.linkedLabel + "」段" : "") +
       (sp.note ? " · " + sp.note : "") +
       (sp.evidence_quote
         ? "（点击定位原文）"
@@ -394,15 +427,16 @@ function renderAnalysis(a) {
   $("reasoning").textContent = a.reasoning || "";
   $("reasoningRow").hidden = true;
 
-  renderClaimSpans(a.spans);
-  // Hand the typed spans to the ChatGPT page so the claim's own sentence gets
-  // colored in place (the annotate engine's first use on the answer side).
-  if (a.spans?.length && pendingNow) {
+  const colored = colorizeSpans(a.spans, a.evidence);
+  renderClaimSpans(colored);
+  // Same colors go to the ChatGPT page, so answer-side segments match the
+  // chips and the source highlights.
+  if (colored.length && pendingNow) {
     chrome.storage.session.set({
       claimSpans: {
         url: pendingNow.url,
         claim: pendingNow.claim,
-        spans: a.spans.map((sp) => ({ quote: sp.text, color: (SPAN_TYPES[sp.type] || {}).color || "#64748b" })),
+        spans: colored.map((sp) => ({ quote: sp.text, color: sp.color })),
         ts: Date.now(),
       },
     });
