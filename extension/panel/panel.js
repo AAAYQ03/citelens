@@ -519,6 +519,24 @@ $("captureBtn").addEventListener("click", async () => {
 $("expandBtn").addEventListener("click", () => {
   $("reasoningRow").hidden = !$("reasoningRow").hidden;
 });
+$("verifyAllBtn").addEventListener("click", async () => {
+  const btn = $("verifyAllBtn");
+  btn.disabled = true;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.id) throw new Error("no active tab");
+    const req = await chrome.tabs.sendMessage(tab.id, { type: "getLastAnswer" });
+    if (!req) {
+      setStatus('<p class="error">No cited ChatGPT answer found in the active tab.</p>');
+      return;
+    }
+    enterOverview({ ...req, ts: Date.now() });
+  } catch {
+    setStatus('<p class="error">Can\'t reach the page — open a chatgpt.com tab and reload it (Cmd+R) so the extension re-injects.</p>');
+  } finally {
+    btn.disabled = false;
+  }
+});
 $("settingsBtn").addEventListener("click", () => {
   $("settings").hidden = !$("settings").hidden;
 });

@@ -146,6 +146,27 @@ try {
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area === "session" && ch.overview?.newValue) paintOverview(ch.overview.newValue);
   });
+  // The panel can ask for the newest cited answer, so verifying a long reply
+  // doesn't depend on finding the button at the bottom of it.
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "getLastAnswer") return;
+    scan();
+    const msgs = [...document.querySelectorAll(SELECTORS.assistantMessage)].filter(
+      (m) => externalUrls(m).length
+    );
+    const last = msgs[msgs.length - 1];
+    if (!last) {
+      sendResponse(null);
+      return true;
+    }
+    if (!last.dataset.citelensMsg) decorateMessage(last);
+    sendResponse({
+      msgId: last.dataset.citelensMsg,
+      text: last.innerText.replace(/◎ Verify answer/g, " ").slice(0, 8000),
+      urls: externalUrls(last),
+    });
+    return true;
+  });
 } catch {}
 
 let timer = null;
