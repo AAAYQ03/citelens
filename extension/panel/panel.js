@@ -13,9 +13,9 @@ let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
 let applyWatchdog = null;
 
-const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, ANALYSIS_SCHEMA,
-  splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse,
-  DECOMPOSE_SCHEMA, buildDecomposePrompt, validateClaims } = window.CiteLensCore;
+const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, ANALYSIS_SCHEMA, SPAN_TYPES,
+  finalizeAnalysis, splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt,
+  parseCitationsResponse, DECOMPOSE_SCHEMA, buildDecomposePrompt, validateClaims } = window.CiteLensCore;
 
 const STANCE_UI = {
   supported: ["✓ 支撑", "ok"],
@@ -219,7 +219,7 @@ async function analyze() {
       const raw = (data.content || []).find((b) => b.type === "text")?.text || "";
       parsed = parseAnalysis(raw);
     }
-    parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+    parsed = finalizeAnalysis(parsed, pendingNow.claim, excerpt);
     if (engine === "citations" && parsed.evidence.length === 0) {
       // Some models return no citation pointers — fall back to the prompt
       // engine rather than showing an empty analysis.
@@ -243,9 +243,8 @@ async function analyze() {
       const fbData = await fbRes.json();
       if (fbRes.ok) {
         const raw = (fbData.content || []).find((b) => b.type === "text")?.text || "";
-        parsed = parseAnalysis(raw);
         excerpt = fbExcerpt;
-        parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+        parsed = finalizeAnalysis(parseAnalysis(raw), pendingNow.claim, excerpt);
         setStatus("");
       }
     }
@@ -307,6 +306,33 @@ function focusEvidence(ev) {
   chrome.storage.session.set({ focus: { url: pendingNow.url, quote: ev.quote, ts: Date.now() } });
 }
 
+function renderClaimSpans(spans) {
+  const el = $("claimText");
+  if (!spans?.length || !pendingNow?.claim) return;
+  el.textContent = "";
+  const text = pendingNow.claim.replace(/\s+/g, " ").trim();
+  let cursor = 0;
+  for (const sp of spans) {
+    if (sp.pos > cursor) el.appendChild(document.createTextNode(text.slice(cursor, sp.pos)));
+    const meta = SPAN_TYPES[sp.type] || {};
+    const node = document.createElement("span");
+    node.textContent = text.slice(sp.pos, sp.pos + sp.text.length);
+    node.style.background = (meta.color || "#64748b") + "33";
+    node.style.borderBottom = "2px solid " + (meta.color || "#64748b");
+    node.style.cursor = sp.evidence_quote ? "pointer" : "default";
+    node.title = (meta.zh || sp.type) + (sp.note ? "：" + sp.note : "");
+    if (sp.evidence_quote) {
+      node.addEventListener("click", (e) => {
+        e.stopPropagation();
+        chrome.storage.session.set({ focus: { url: pendingNow.url, quote: sp.evidence_quote, ts: Date.now() } });
+      });
+    }
+    el.appendChild(node);
+    cursor = sp.pos + sp.text.length;
+  }
+  if (cursor < text.length) el.appendChild(document.createTextNode(text.slice(cursor)));
+}
+
 function renderAnalysis(a) {
   $("analysisStrip").hidden = false;
   const flag = $("stanceFlag");
@@ -330,6 +356,20 @@ function renderAnalysis(a) {
   }
   $("reasoning").textContent = a.reasoning || "";
   $("reasoningRow").hidden = true;
+
+  renderClaimSpans(a.spans);
+  // Hand the typed spans to the ChatGPT page so the claim's own sentence gets
+  // colored in place (the annotate engine's first use on the answer side).
+  if (a.spans?.length && pendingNow) {
+    chrome.storage.session.set({
+      claimSpans: {
+        url: pendingNow.url,
+        claim: pendingNow.claim,
+        spans: a.spans.map((sp) => ({ quote: sp.text, color: (SPAN_TYPES[sp.type] || {}).color || "#64748b" })),
+        ts: Date.now(),
+      },
+    });
+  }
 }
 
 /* ------------------------------ overview mode ----------------------------- */
@@ -454,8 +494,7 @@ async function enterOverview(req) {
             messages: [{ role: "user", content: buildPrompt(c.text, excerpt) }],
           });
           const vraw = (vd.content || []).find((b) => b.type === "text")?.text || "";
-          const parsed = parseAnalysis(vraw);
-          parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+          const parsed = finalizeAnalysis(parseAnalysis(vraw), c.text, excerpt);
           c.stance = parsed.stance || "supported";
           c.reasoning = parsed.reasoning;
           const [label, cls] = STANCE_UI[c.stance] || ["?", "muted"];

@@ -13,7 +13,9 @@ window.CiteLensAnnotate = (() => {
   };
   const PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#a855f7", "#f43f5e",
     "#0ea5e9", "#d946ef", "#64748b", "#84cc16", "#f97316"];
-  const ALLCOLORS = [...new Set([...Object.values(FIXED), ...PALETTE])];
+    // span-transformation colors (claim-side painting)
+  const EXTRA = ["#dc2626", "#9ca3af", "#0ea5e9", "#f97316"];
+  const ALLCOLORS = [...new Set([...Object.values(FIXED), ...PALETTE, ...EXTRA])];
 
   const colorFor = (label) => {
     if (FIXED[label]) return FIXED[label];
@@ -216,5 +218,23 @@ window.CiteLensAnnotate = (() => {
     return true;
   }
 
-  return { annotate, focus, colorFor, appliedCount };
+  // Paint pre-colored verbatim spans (no notes, no DOM mutation) — used to
+  // color the claim's own sentence on the answer side.
+  function paintSpans(root, spans) {
+    const doc = root.ownerDocument || document;
+    ensureStyle(doc);
+    const index = buildIndex(root, doc);
+    let n = 0;
+    for (const s of spans || []) {
+      const nq = normWs(s.quote || s.text || "");
+      if (!nq) continue;
+      const range = rangeFromIndex(index, nq, doc);
+      if (!range) continue;
+      paint(doc, range, s.color || colorFor(s.label || ""));
+      n++;
+    }
+    return n;
+  }
+
+  return { annotate, focus, colorFor, appliedCount, paintSpans };
 })();

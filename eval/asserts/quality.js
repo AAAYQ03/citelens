@@ -14,11 +14,15 @@ module.exports = (output, { vars }) => {
   const valid = core.validateEvidence(parsed.evidence, excerpt);
   const verbatimRate = rawCount ? valid.length / rawCount : 0;
   const minEvidence = vars.min_evidence ?? 2;
-  // Stance agreement: hard gate on exception cases (the whole point of the
-  // flag), reported-only on supported ones (borderline overstated calls are
-  // judged by the llm-rubric asserts instead).
-  const stanceKnown = !!vars.stance && !!parsed.stance;
-  const stanceAgrees = stanceKnown ? parsed.stance === vars.stance : null;
+  // Stance is DERIVED: deterministic aggregation over validated claim spans
+  // (transformation labels + numeric check); a model-provided stance only
+  // backstops span-less engines. Hard gate on exception cases.
+  const spans = core.validateSpans(parsed.spans, vars.claim, excerpt);
+  const spanCoverage = spans.reduce((s, sp) => s + sp.text.length, 0) /
+    Math.max(1, core.normWs(vars.claim).length);
+  const derived = core.deriveStance(spans) ?? parsed.stance ?? null;
+  const stanceKnown = !!vars.stance && !!derived;
+  const stanceAgrees = stanceKnown ? derived === vars.stance : null;
   const stanceGate = vars.stance && vars.stance !== "supported" ? stanceAgrees === true : true;
   const pass = valid.length >= minEvidence && verbatimRate >= 0.6 && parsed.reasoning.length > 0 && stanceGate;
   return {
@@ -26,6 +30,7 @@ module.exports = (output, { vars }) => {
     score: verbatimRate,
     reason:
       `evidence ${valid.length}/${rawCount} verbatim-anchored (need >=${minEvidence}, rate >=60%)` +
-      (stanceKnown ? `; stance ${parsed.stance} vs human ${vars.stance} (${stanceAgrees ? "agree" : "DISAGREE"})` : ""),
+      (stanceKnown ? `; derived stance ${derived} vs human ${vars.stance} (${stanceAgrees ? "agree" : "DISAGREE"})` : "") +
+      `; spans ${spans.length}, coverage ${(spanCoverage * 100).toFixed(0)}%`,
   };
 };

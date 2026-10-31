@@ -200,5 +200,55 @@ test("validateClaims enforces length, url allowlist, and cap", () => {
 test("schemas stay closed (structured outputs requirement)", () => {
   assert.equal(core.DECOMPOSE_SCHEMA.additionalProperties, false);
   assert.equal(core.DECOMPOSE_SCHEMA.properties.claims.items.additionalProperties, false);
-  assert.ok(core.ANALYSIS_SCHEMA.properties.stance.enum.length === 4);
+  assert.equal(core.ANALYSIS_SCHEMA.properties.spans.items.additionalProperties, false);
+  assert.equal(core.ANALYSIS_SCHEMA.properties.spans.items.properties.type.enum.length, 10);
+  assert.ok(!core.ANALYSIS_SCHEMA.properties.stance, "stance is derived, not model-emitted");
+});
+
+test("validateSpans: verbatim-in-claim, enum, overlap-free, source-quote check", () => {
+  const claim = "Studies show coffee lowers diabetes risk in all adults.";
+  const excerpt = "Coffee was associated with a LOWER risk of diabetes.";
+  const out = core.validateSpans(
+    [
+      { text: "coffee lowers diabetes risk", type: "causal_upgrade", note: "n", evidence_quote: "associated with a LOWER risk" },
+      { text: "lowers diabetes", type: "paraphrase", note: "overlaps prev", evidence_quote: "" },
+      { text: "in all adults", type: "scope_broadened", note: "n", evidence_quote: "not in the excerpt" },
+      { text: "ghost text", type: "quote", note: "", evidence_quote: "" },
+      { text: "Studies show", type: "invented_type", note: "", evidence_quote: "" },
+    ],
+    claim, excerpt
+  );
+  assert.equal(out.length, 2);
+  assert.equal(out[0].text, "coffee lowers diabetes risk");
+  assert.equal(out[0].evidence_quote, "associated with a LOWER risk");
+  assert.equal(out[1].evidence_quote, "");
+  assert.ok(out[0].pos < out[1].pos);
+});
+
+test("deriveStance: deterministic aggregation rules", () => {
+  const mk = (type, text = "x".repeat(10), eq = "") => ({ text, pos: 0, type, note: "", evidence_quote: eq });
+  assert.equal(core.deriveStance([mk("quote"), mk("paraphrase")]), "supported");
+  assert.equal(core.deriveStance([mk("quote"), mk("condition_dropped")]), "overstated");
+  assert.equal(core.deriveStance([mk("contradicted")]), "contradicted");
+  assert.equal(core.deriveStance([mk("unsupported", "y".repeat(100)), mk("quote", "z".repeat(10))]), "not_addressed");
+  assert.equal(core.deriveStance([]), null);
+});
+
+test("deriveStance: numeric mismatch escalates to contradicted", () => {
+  const sp = { text: "a 16% reduction", pos: 0, type: "number", note: "", evidence_quote: "a 6% reduction" };
+  assert.equal(core.deriveStance([sp]), "contradicted");
+  const ok = { ...sp, text: "a 6% reduction" };
+  assert.equal(core.deriveStance([ok]), "supported");
+});
+
+test("finalizeAnalysis derives stance from spans, keeps model stance otherwise", () => {
+  const claim = "All users improved.";
+  const excerpt = "72% of participants improved.";
+  const withSpans = core.finalizeAnalysis(
+    { reasoning: "r", evidence: [], spans: [{ text: "All users improved.", type: "scope_broadened", note: "", evidence_quote: "72% of participants improved." }], stance: "supported" },
+    claim, excerpt
+  );
+  assert.equal(withSpans.stance, "overstated");
+  const noSpans = core.finalizeAnalysis({ reasoning: "r", evidence: [], spans: [], stance: "not_addressed" }, claim, excerpt);
+  assert.equal(noSpans.stance, "not_addressed");
 });

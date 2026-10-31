@@ -530,9 +530,26 @@ function paintOverview(result) {
   }
 }
 
+function paintClaimSpans(cs) {
+  if (!cs?.spans?.length) return;
+  const ct = tokenize(cs.claim || "");
+  let best = { el: null, sc: 0 };
+  for (const msgEl of assistantMessages()) {
+    for (const el of msgEl.querySelectorAll("p, li, td, blockquote")) {
+      if (!el.innerText || el.innerText.trim().length < 20) continue;
+      const sc = overlap(ct, tokenize(el.innerText));
+      if (sc > best.sc) best = { el, sc };
+    }
+  }
+  if (!best.el || best.sc < 0.4 || !window.CiteLensAnnotate) return;
+  const n = window.CiteLensAnnotate.paintSpans(best.el, cs.spans);
+  console.info("[CiteLens] claim spans painted:", n, "/", cs.spans.length);
+}
+
 try {
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area === "session" && ch.overview?.newValue) paintOverview(ch.overview.newValue);
+    if (area === "session" && ch.claimSpans?.newValue) paintClaimSpans(ch.claimSpans.newValue);
   });
   // The panel can ask for the newest cited answer, so verifying a long reply
   // doesn't depend on finding the button at the bottom of it.

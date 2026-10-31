@@ -46,14 +46,22 @@
       "EXCERPT of the source it cites, analyze how (and whether) the source supports the claim.\n\n" +
       "Return ONLY valid JSON, no markdown fences:\n" +
       "{\n" +
-      ' "stance": "supported" (the source backs the claim) | "overstated" (the claim stretches what the source says, e.g. most->all) | "contradicted" (the source says the opposite) | "not_addressed" (the source never covers this),\n' +
       ' "reasoning": "2-3 sentences explaining the logical chain from source to claim. Write in the same language as the CLAIM.",\n' +
       ' "evidence": [\n' +
       '  { "quote": "EXACT verbatim substring copied character-for-character from the EXCERPT (keep its original language)",\n' +
       '    "label": "a 2-4 character category label in the language of the CLAIM, describing what KIND of content this passage is",\n' +
       '    "note": "one short sentence: why this passage matters for the claim, in the language of the CLAIM" }\n' +
+      " ],\n" +
+      ' "spans": [\n' +
+      '  { "text": "EXACT verbatim substring of the CLAIM (the spans together should cover the whole claim, no overlaps)",\n' +
+      '    "type": "quote" (verbatim from source) | "paraphrase" (faithful rewording) | "number" (restates a figure) | "causal_upgrade" (correlation stated as causation, hedge dropped) | "condition_dropped" (a qualifier/population/setting in the source is omitted) | "scope_broadened" (some/most -> all, narrower -> broader) | "time_shift" (different time frame than the source) | "entity_shift" (different subject than the source) | "contradicted" (source states the opposite) | "unsupported" (nothing in the source covers this),\n' +
+      '    "note": "one short sentence in the CLAIM language: what transformation happened here",\n' +
+      '    "evidence_quote": "EXACT verbatim substring of the EXCERPT this span derives from, or \"\" when type is unsupported" }\n' +
       " ]\n" +
       "}\n" +
+      "Span rules: segment the ENTIRE claim into 1-8 non-overlapping spans copied character-for-character " +
+      "from the CLAIM. The transformation type is about what changed between the source and the claim — " +
+      "be strict: a dropped qualifier or an upgraded hedge is NOT a paraphrase.\n" +
       "Label guidance: pick whatever fits THIS article's genre — common ones include " +
       "原理/推导/结论/数据/示例/条件/背景/观点 (or Principle/Reasoning/Conclusion/Data/Example/Condition for English claims), " +
       "but invent a better short label if none fit. Never force a category that does not match the text.\n" +
@@ -79,6 +87,7 @@
       stance: STANCES.includes(parsed.stance) ? parsed.stance : null,
       reasoning: String(parsed.reasoning ?? ""),
       evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
+      spans: Array.isArray(parsed.spans) ? parsed.spans : [],
     };
   }
 
@@ -104,6 +113,66 @@
       .sort((a, b) => nx.indexOf(normWs(a.quote)) - nx.indexOf(normWs(b.quote)));
   }
 
+  // Claim-side spans: verbatim-or-drop against the CLAIM (mirror of the
+  // evidence rule), enum-checked types, overlap-free, source quotes verified.
+  function validateSpans(spans, claim, excerpt) {
+    const nc = normWs(claim);
+    const nx = normWs(excerpt);
+    const out = [];
+    for (const s of spans || []) {
+      if (!s?.text || !SPAN_TYPES[s.type]) continue;
+      const t = normWs(s.text);
+      if (!t || t.length > 400) continue;
+      const pos = nc.indexOf(t);
+      if (pos < 0) continue;
+      if (out.some((o) => pos < o.pos + o.text.length && o.pos < pos + t.length)) continue;
+      let eq = normWs(s.evidence_quote || "");
+      if (eq && !nx.includes(eq)) eq = "";
+      out.push({ text: t, pos, type: s.type, note: String(s.note ?? "").slice(0, 200), evidence_quote: eq });
+    }
+    out.sort((a, b) => a.pos - b.pos);
+    return out.slice(0, 8);
+  }
+
+  const extractNumbers = (s) =>
+    (String(s).match(/\d+(?:[.,]\d+)?%?/g) || []).map((x) => x.replace(/,/g, ""));
+
+  // The verdict is no longer a model opinion: it is a deterministic
+  // aggregation over labeled transformations (plus a code-level numeric
+  // consistency check). Returns null when there are no spans to aggregate.
+  function deriveStance(spans) {
+    if (!spans || !spans.length) return null;
+    let overst = false;
+    let contra = false;
+    let unsupportedChars = 0;
+    let totalChars = 0;
+    for (const sp of spans) {
+      totalChars += sp.text.length;
+      const meta = SPAN_TYPES[sp.type];
+      if (meta?.flag === "contradicted") contra = true;
+      if (meta?.flag === "overstated") overst = true;
+      if (meta?.flag === "unsupported") unsupportedChars += sp.text.length;
+      if (sp.type === "number" && sp.evidence_quote) {
+        const a = extractNumbers(sp.text);
+        const b = extractNumbers(sp.evidence_quote);
+        if (a.length && b.length && !a.every((n) => b.includes(n))) contra = true;
+      }
+    }
+    if (contra) return "contradicted";
+    if (overst) return "overstated";
+    if (totalChars > 0 && unsupportedChars / totalChars > 0.6) return "not_addressed";
+    return "supported";
+  }
+
+  // One entry point for both engines: validate everything, derive the stance
+  // from spans when present, otherwise keep a model-provided stance.
+  function finalizeAnalysis(parsed, claim, excerpt) {
+    parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+    parsed.spans = validateSpans(parsed.spans, claim, excerpt);
+    parsed.stance = deriveStance(parsed.spans) ?? parsed.stance ?? null;
+    return parsed;
+  }
+
   // Share of evidence quotes that anchor verbatim in the given text.
   function anchorRate(evidence, text) {
     const nx = normWs(text);
@@ -117,10 +186,25 @@
   // (output_config.format; every object needs additionalProperties:false).
   const STANCES = ["supported", "overstated", "contradicted", "not_addressed"];
 
+  // Transformation vocabulary (FRANK-lineage): what happened between the
+  // source's words and the AI's sentence. Verbs, not nouns — this is where
+  // "how the source leads to the claim" actually lives.
+  const SPAN_TYPES = {
+    quote: { zh: "直接引用", color: "#10b981", flag: null },
+    paraphrase: { zh: "改述", color: "#64748b", flag: null },
+    number: { zh: "数字复述", color: "#0ea5e9", flag: null }, // deterministically checked
+    causal_upgrade: { zh: "因果升级", color: "#f43f5e", flag: "overstated" },
+    condition_dropped: { zh: "条件省略", color: "#f59e0b", flag: "overstated" },
+    scope_broadened: { zh: "范围扩大", color: "#f97316", flag: "overstated" },
+    time_shift: { zh: "时间错位", color: "#a855f7", flag: "overstated" },
+    entity_shift: { zh: "主体错位", color: "#d946ef", flag: "overstated" },
+    contradicted: { zh: "与来源相反", color: "#dc2626", flag: "contradicted" },
+    unsupported: { zh: "来源外补充", color: "#9ca3af", flag: "unsupported" },
+  };
+
   const ANALYSIS_SCHEMA = {
     type: "object",
     properties: {
-      stance: { type: "string", enum: ["supported", "overstated", "contradicted", "not_addressed"] },
       reasoning: { type: "string" },
       evidence: {
         type: "array",
@@ -135,8 +219,25 @@
           additionalProperties: false,
         },
       },
+      spans: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            type: {
+              type: "string",
+              enum: ["quote", "paraphrase", "number", "causal_upgrade", "condition_dropped", "scope_broadened", "time_shift", "entity_shift", "contradicted", "unsupported"],
+            },
+            note: { type: "string" },
+            evidence_quote: { type: "string" },
+          },
+          required: ["text", "type", "note", "evidence_quote"],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ["stance", "reasoning", "evidence"],
+    required: ["reasoning", "evidence", "spans"],
     additionalProperties: false,
   };
 
@@ -335,5 +436,5 @@
       .slice(0, 8);
   }
 
-  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, STANCES, splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse, DECOMPOSE_SCHEMA, buildDecomposePrompt, validateClaims };
+  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, STANCES, SPAN_TYPES, validateSpans, deriveStance, finalizeAnalysis, splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse, DECOMPOSE_SCHEMA, buildDecomposePrompt, validateClaims };
 });
