@@ -210,7 +210,19 @@ window.CiteLensAnnotate = (() => {
 
   function focus(root, quote) {
     const st = stateFor(root);
-    const el = st.quoteBlock.get(normWs(quote));
+    const nq = normWs(quote);
+    let el = st.quoteBlock.get(nq);
+    if (!el) {
+      // Not one of the painted evidence quotes — locate it fresh anywhere in
+      // the document (claim-span anchors are their own verified quotes).
+      const doc = root.ownerDocument || document;
+      ensureStyle(doc);
+      const range = rangeFromIndex(buildIndex(root, doc), nq, doc);
+      if (range) {
+        paint(doc, range, "#4f46e5");
+        el = blockFor(range);
+      }
+    }
     if (!el) return false;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.add("citelens-flash");
