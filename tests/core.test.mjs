@@ -162,3 +162,43 @@ test("explodeToSentences produces citation-sized chunks with parent mapping", ()
   assert.ok(indexMap.slice(0, 2).every((i) => i === 4));
   assert.ok(indexMap.slice(2).every((i) => i === 9));
 });
+
+test("parseAnalysis validates stance against the enum", () => {
+  const ok = core.parseAnalysis('{"stance":"contradicted","reasoning":"r","evidence":[]}');
+  assert.equal(ok.stance, "contradicted");
+  const bad = core.parseAnalysis('{"stance":"maybe","reasoning":"r","evidence":[]}');
+  assert.equal(bad.stance, null);
+});
+
+test("parseCitationsResponse extracts STANCE and keeps it out of reasoning", () => {
+  const out = core.parseCitationsResponse(
+    [{ type: "text", text: "REASONING: the source never covers pricing. STANCE: not_addressed" }],
+    null,
+    null
+  );
+  assert.equal(out.stance, "not_addressed");
+  assert.ok(!out.reasoning.includes("STANCE"));
+});
+
+test("validateClaims enforces length, url allowlist, and cap", () => {
+  const urls = ["https://a.com/x"];
+  const claims = core.validateClaims(
+    [
+      { text: "A verifiable factual claim about the world.", url: "https://a.com/x", verifiable: true },
+      { text: "too short", url: "https://a.com/x", verifiable: true },
+      { text: "A claim pointing at an unlisted citation URL somehow.", url: "https://evil.com", verifiable: true },
+      ...Array.from({ length: 10 }, (_, i) => ({ text: `Filler verifiable claim number ${i} with enough length.`, url: "", verifiable: true })),
+    ],
+    urls
+  );
+  assert.ok(claims.length <= 8);
+  assert.equal(claims[0].url, "https://a.com/x");
+  assert.equal(claims[1].url, "");
+  assert.ok(claims.every((c) => c.text.length > 15));
+});
+
+test("schemas stay closed (structured outputs requirement)", () => {
+  assert.equal(core.DECOMPOSE_SCHEMA.additionalProperties, false);
+  assert.equal(core.DECOMPOSE_SCHEMA.properties.claims.items.additionalProperties, false);
+  assert.ok(core.ANALYSIS_SCHEMA.properties.stance.enum.length === 4);
+});

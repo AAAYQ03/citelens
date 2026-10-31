@@ -8,6 +8,12 @@ chrome.storage.session
   .catch(() => {});
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg?.type === "openOverview" && sender.tab?.id != null) {
+    chrome.storage.session.set({
+      overviewRequest: { msgId: msg.msgId, text: msg.text, urls: msg.urls || [], ts: Date.now() },
+    });
+    chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => {});
+  }
   if (msg?.type === "openSource" && sender.tab?.id != null) {
     chrome.storage.session.set({
       pending: { url: msg.url, claim: msg.claim || "", ts: Date.now() },

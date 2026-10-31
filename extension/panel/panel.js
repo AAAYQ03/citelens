@@ -13,7 +13,15 @@ let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
 
 const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, ANALYSIS_SCHEMA,
-  splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse } = window.CiteLensCore;
+  splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse,
+  DECOMPOSE_SCHEMA, buildDecomposePrompt, validateClaims } = window.CiteLensCore;
+
+const STANCE_UI = {
+  supported: ["✓ 支撑", "ok"],
+  overstated: ["⚠ 夸大", "warn"],
+  contradicted: ["✗ 来源矛盾", "bad"],
+  not_addressed: ["⚠ 来源未提及", "warn"],
+};
 
 /* --------------------------------- UI bits -------------------------------- */
 
@@ -286,6 +294,14 @@ function focusEvidence(ev) {
 
 function renderAnalysis(a) {
   $("analysisStrip").hidden = false;
+  const flag = $("stanceFlag");
+  if (a.stance && a.stance !== "supported" && STANCE_UI[a.stance]) {
+    flag.hidden = false;
+    flag.textContent = STANCE_UI[a.stance][0];
+    flag.className = "flag " + STANCE_UI[a.stance][1];
+  } else {
+    flag.hidden = true;
+  }
   const chipRow = $("chipRow");
   chipRow.textContent = "";
   for (const ev of a.evidence) {
@@ -301,11 +317,170 @@ function renderAnalysis(a) {
   $("reasoningRow").hidden = true;
 }
 
+/* ------------------------------ overview mode ----------------------------- */
+
+async function callClaude(key, body) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || "API error");
+  return data;
+}
+
+function ovRow(i, claim) {
+  const row = document.createElement("div");
+  row.className = "ov-row";
+  row.id = "ov-" + i;
+  const status = document.createElement("span");
+  status.className = "ov-status muted";
+  status.textContent = claim.url ? "⏳ queued" : "○ no citation";
+  const text = document.createElement("span");
+  text.className = "ov-text";
+  text.textContent = claim.text;
+  row.append(status, text);
+  if (claim.url) {
+    row.title = claim.url + " — click to inspect this claim against its source";
+    row.addEventListener("click", () => {
+      chrome.storage.session.set({ pending: { url: claim.url, claim: claim.text, ts: Date.now() } });
+    });
+  }
+  return row;
+}
+
+function setOvStatus(i, text, cls) {
+  const s = document.querySelector("#ov-" + i + " .ov-status");
+  if (s) {
+    s.textContent = text;
+    s.className = "ov-status " + (cls || "muted");
+  }
+}
+
+async function enterOverview(req) {
+  pendingNow = null;
+  $("emptyHint").hidden = true;
+  $("claimCard").hidden = true;
+  $("analysisStrip").hidden = true;
+  $("reasoningRow").hidden = true;
+  $("srcbar").hidden = true;
+  $("frame").hidden = true;
+  setStatus("");
+  const ov = $("overview");
+  ov.hidden = false;
+  $("ovList").textContent = "";
+  $("ovSummary").textContent = "Decomposing the answer into atomic claims…";
+
+  const { anthropicKey, analysisModel } = await chrome.storage.local.get(["anthropicKey", "analysisModel"]);
+  if (!anthropicKey) {
+    $("ovSummary").textContent = "Add your Anthropic API key first (⚙).";
+    $("settings").hidden = false;
+    return;
+  }
+  const model = analysisModel || "claude-sonnet-5";
+
+  try {
+    // 1) decompose (structured outputs)
+    const d = await callClaude(anthropicKey, {
+      model,
+      max_tokens: 2000,
+      output_config: { format: { type: "json_schema", schema: DECOMPOSE_SCHEMA } },
+      messages: [{ role: "user", content: buildDecomposePrompt(req.text, req.urls) }],
+    });
+    const raw = (d.content || []).find((b) => b.type === "text")?.text || "";
+    const claims = validateClaims(JSON.parse(raw).claims, req.urls);
+    if (!claims.length) {
+      $("ovSummary").textContent = "No verifiable claims found in this answer.";
+      return;
+    }
+    claims.forEach((c, i) => $("ovList").appendChild(ovRow(i, c)));
+    $("ovSummary").textContent = `${claims.length} claims · fetching sources…`;
+
+    // 2) layer-0 precheck + source fetch (deterministic, parallel, cached per URL)
+    const articleText = {};
+    const urls = [...new Set(claims.map((c) => c.url).filter(Boolean))];
+    await Promise.all(
+      urls.map(async (u) => {
+        try {
+          const a = await getArticle(u);
+          articleText[u] = a.textContent;
+        } catch {
+          articleText[u] = null;
+        }
+      })
+    );
+    claims.forEach((c, i) => {
+      if (c.url && articleText[c.url] === null) setOvStatus(i, "— unreachable", "muted");
+    });
+
+    // 3) parallel verification, concurrency 2, budget cap 6 calls
+    const queue = claims
+      .map((c, i) => ({ c, i }))
+      .filter((x) => x.c.url && x.c.verifiable && articleText[x.c.url]);
+    const skipped = queue.splice(6);
+    skipped.forEach((x) => setOvStatus(x.i, "· skipped (budget)", "muted"));
+
+    async function worker() {
+      while (queue.length) {
+        const { c, i } = queue.shift();
+        setOvStatus(i, "⏳ verifying…", "muted");
+        try {
+          const excerpt = relevantExcerpt(articleText[c.url], c.text);
+          const vd = await callClaude(anthropicKey, {
+            model,
+            max_tokens: 4000,
+            output_config: { format: { type: "json_schema", schema: ANALYSIS_SCHEMA } },
+            messages: [{ role: "user", content: buildPrompt(c.text, excerpt) }],
+          });
+          const vraw = (vd.content || []).find((b) => b.type === "text")?.text || "";
+          const parsed = parseAnalysis(vraw);
+          parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+          c.stance = parsed.stance || "supported";
+          c.reasoning = parsed.reasoning;
+          const [label, cls] = STANCE_UI[c.stance] || ["?", "muted"];
+          setOvStatus(i, label + " · " + parsed.evidence.length + " ev", cls);
+          const row = document.getElementById("ov-" + i);
+          if (row && c.reasoning) row.title = c.reasoning;
+        } catch (e) {
+          setOvStatus(i, "error", "bad");
+        }
+      }
+    }
+    await Promise.all([worker(), worker()]);
+
+    // 4) aggregate + hand results to the content script for paint-back
+    const n = { ok: 0, flag: 0, other: 0 };
+    for (const c of claims) {
+      if (c.stance === "supported") n.ok++;
+      else if (c.stance) n.flag++;
+      else n.other++;
+    }
+    $("ovSummary").textContent =
+      `${claims.length} claims · ${n.ok} ✓ supported · ${n.flag} flagged · ${n.other} unverified`;
+    chrome.storage.session.set({
+      overview: {
+        msgId: req.msgId,
+        claims: claims.map((c) => ({ text: c.text, url: c.url, stance: c.stance || null, reasoning: c.reasoning || "" })),
+        ts: Date.now(),
+      },
+    });
+  } catch (e) {
+    $("ovSummary").textContent = "Overview failed: " + (e.message || e);
+  }
+}
+
 /* --------------------------------- routing -------------------------------- */
 
 function handle(pending) {
   if (!pending?.url) return;
   pendingNow = pending;
+  $("overview").hidden = true;
   $("emptyHint").hidden = true;
   $("claimCard").hidden = !pending.claim;
   $("claimText").textContent = pending.claim;
@@ -366,5 +541,10 @@ chrome.storage.local.get(["anthropicKey", "analysisModel", "engine"]).then(({ an
   chrome.storage.session.get("pending").then(({ pending }) => handle(pending));
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "session" && changes.pending) handle(changes.pending.newValue);
+  if (area !== "session") return;
+  if (changes.overviewRequest?.newValue) enterOverview(changes.overviewRequest.newValue);
+  else if (changes.pending) handle(changes.pending.newValue);
+});
+chrome.storage.session.get("overviewRequest").then(({ overviewRequest }) => {
+  if (overviewRequest && Date.now() - (overviewRequest.ts || 0) < 10000) enterOverview(overviewRequest);
 });

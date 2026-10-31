@@ -14,10 +14,18 @@ module.exports = (output, { vars }) => {
   const valid = core.validateEvidence(parsed.evidence, excerpt);
   const verbatimRate = rawCount ? valid.length / rawCount : 0;
   const minEvidence = vars.min_evidence ?? 2;
-  const pass = valid.length >= minEvidence && verbatimRate >= 0.6 && parsed.reasoning.length > 0;
+  // Stance agreement: hard gate on exception cases (the whole point of the
+  // flag), reported-only on supported ones (borderline overstated calls are
+  // judged by the llm-rubric asserts instead).
+  const stanceKnown = !!vars.stance && !!parsed.stance;
+  const stanceAgrees = stanceKnown ? parsed.stance === vars.stance : null;
+  const stanceGate = vars.stance && vars.stance !== "supported" ? stanceAgrees === true : true;
+  const pass = valid.length >= minEvidence && verbatimRate >= 0.6 && parsed.reasoning.length > 0 && stanceGate;
   return {
     pass,
     score: verbatimRate,
-    reason: `evidence ${valid.length}/${rawCount} verbatim-anchored (need >=${minEvidence}, rate >=60%)`,
+    reason:
+      `evidence ${valid.length}/${rawCount} verbatim-anchored (need >=${minEvidence}, rate >=60%)` +
+      (stanceKnown ? `; stance ${parsed.stance} vs human ${vars.stance} (${stanceAgrees ? "agree" : "DISAGREE"})` : ""),
   };
 };

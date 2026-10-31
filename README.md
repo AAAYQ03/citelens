@@ -33,7 +33,11 @@ from reading a claim to understanding exactly what it stands on.
      principle, which the data, which the conclusion
    - a short **reasoning chain** explaining how those passages add up to the claim — and if
      the source doesn't actually say what the answer claims, the reasoning says so plainly
-4. **Evidence painted onto the page.** Each quote is highlighted sentence-precisely in its
+4. **Whole-answer mode.** "◎ Verify answer" under a reply decomposes it into atomic
+   claims, verifies each claim against its own citation in parallel, and flags the
+   exceptions (⚠ overstated / ✗ contradicted / ⚠ not addressed) right on the answer —
+   supported claims stay unmarked, so a flag always means something.
+5. **Evidence painted onto the page.** Each quote is highlighted sentence-precisely in its
    role color, with a collapsible "why this passage matters" note under the paragraph.
    Role chips in the panel jump straight to their passage.
 
@@ -87,8 +91,9 @@ eval case with one click (⤓). Details: [eval/README.md](eval/README.md).
 - **No verdict grades.** An earlier version shipped ✅/⚠️/❌ verdicts and we removed
   them: with frontier models most claims check out, so the grade carried little
   information while inviting "LLM judges LLM" circularity. The product is the
-  derivation, not the judgment. (Planned: exception-only flags when a source
-  contradicts or never addresses a claim — signal only where the information is.)
+  derivation, not the judgment. (Shipped as exception-only flags: a
+  supported claim shows nothing; overstated / contradicted / not-addressed claims get a
+  flag — signal only where the information is.)
 - **Deterministic control flow, bounded agency.** The core pipeline is a single LLM
   call orchestrated by code — no agent framework, because the flow is fully
   specifiable. Agentic control is reserved for the one step that needs it (planned:
@@ -100,7 +105,10 @@ eval case with one click (⤓). Details: [eval/README.md](eval/README.md).
 
 ## Roadmap
 
-- Whole-answer overview: analyze every citation in an answer in one pass
+- ~~Whole-answer overview~~ — shipped: "◎ Verify answer" decomposes an answer into
+  atomic claims (VeriScore-style), verifies each against its citation in parallel
+  (bounded: concurrency 2, 6-call budget), and paints exception flags back onto the
+  answer itself
 - Select any text in the answer → verify it, beyond citation granularity
 - claude.ai adapter (the ChatGPT adapter is ~50 lines; selectors are config)
 - Exportable verification reports; multi-model "citation diff"

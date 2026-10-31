@@ -46,6 +46,7 @@
       "EXCERPT of the source it cites, analyze how (and whether) the source supports the claim.\n\n" +
       "Return ONLY valid JSON, no markdown fences:\n" +
       "{\n" +
+      ' "stance": "supported" (the source backs the claim) | "overstated" (the claim stretches what the source says, e.g. most->all) | "contradicted" (the source says the opposite) | "not_addressed" (the source never covers this),\n' +
       ' "reasoning": "2-3 sentences explaining the logical chain from source to claim. Write in the same language as the CLAIM.",\n' +
       ' "evidence": [\n' +
       '  { "quote": "EXACT verbatim substring copied character-for-character from the EXCERPT (keep its original language)",\n' +
@@ -74,7 +75,11 @@
       .trim();
     const parsed = JSON.parse(cleaned);
     if (typeof parsed !== "object" || parsed === null) throw new Error("not an object");
-    return { reasoning: String(parsed.reasoning ?? ""), evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [] };
+    return {
+      stance: STANCES.includes(parsed.stance) ? parsed.stance : null,
+      reasoning: String(parsed.reasoning ?? ""),
+      evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
+    };
   }
 
   // Verbatim-or-drop, dedupe, cap, label hygiene, then sort by source position.
@@ -110,9 +115,12 @@
 
   // JSON Schema for structured outputs on the prompt engine
   // (output_config.format; every object needs additionalProperties:false).
+  const STANCES = ["supported", "overstated", "contradicted", "not_addressed"];
+
   const ANALYSIS_SCHEMA = {
     type: "object",
     properties: {
+      stance: { type: "string", enum: ["supported", "overstated", "contradicted", "not_addressed"] },
       reasoning: { type: "string" },
       evidence: {
         type: "array",
@@ -128,7 +136,7 @@
         },
       },
     },
-    required: ["reasoning", "evidence"],
+    required: ["stance", "reasoning", "evidence"],
     additionalProperties: false,
   };
 
@@ -225,7 +233,8 @@
       "  - <label> is a 2-4 character category in the language of the CLAIM (e.g. 原理/推导/结论/数据/示例/条件/背景/观点, " +
       "or Principle/Data/Conclusion for English claims); pick what fits this article's genre\n" +
       "REASONING: <2-3 sentences in the language of the CLAIM explaining the logical chain from source to claim; " +
-      "if the source does not actually support the claim, say so plainly and state what it actually says>\n\n" +
+      "if the source does not actually support the claim, say so plainly and state what it actually says>\n" +
+      "STANCE: <exactly one of: supported | overstated | contradicted | not_addressed>\n\n" +
       "CLAIM:\n" + claim
     );
   }
@@ -236,6 +245,7 @@
   function parseCitationsResponse(content, indexMap, blockTexts) {
     const evidence = [];
     const reasoningParts = [];
+    let stance = null;
     for (const block of content || []) {
       if (block.type !== "text") continue;
       const text = String(block.text || "");
@@ -269,11 +279,61 @@
           });
         }
       }
-      const rm = text.match(/REASONING:\s*([\s\S]*)/);
+      const rm = text.match(/REASONING:\s*([\s\S]*?)(?=STANCE:|$)/);
       if (rm) reasoningParts.push(normWs(rm[1]));
+      const sm = text.match(/STANCE:\s*(supported|overstated|contradicted|not_addressed)/);
+      if (sm) stance = sm[1];
     }
-    return { reasoning: reasoningParts.join(" ").trim(), evidence };
+    return { stance, reasoning: reasoningParts.join(" ").trim(), evidence };
   }
 
-  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse };
+  // Whole-answer overview: decompose an answer into atomic, verifiable
+  // claims, each mapped to the citation URL (if any) that backs it.
+  const DECOMPOSE_SCHEMA = {
+    type: "object",
+    properties: {
+      claims: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            url: { type: "string" },
+            verifiable: { type: "boolean" },
+          },
+          required: ["text", "url", "verifiable"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["claims"],
+    additionalProperties: false,
+  };
+
+  function buildDecomposePrompt(answerText, citationUrls) {
+    return (
+      "Decompose this AI chat answer into its ATOMIC, VERIFIABLE factual claims " +
+      "(VeriScore-style: drop subjective framing, advice, and meta-commentary; keep checkable " +
+      "assertions about the world). For each claim, copy its text in the answer's language, " +
+      "set url to the citation URL from the list below that the answer attaches to this claim " +
+      '(or "" if the claim carries no citation), and verifiable=true unless the claim is opinion.\n' +
+      "Return at most 8 claims, in the order they appear.\n\n" +
+      "CITATION URLS IN THIS ANSWER:\n" + (citationUrls || []).map((u) => "- " + u).join("\n") +
+      "\n\nANSWER:\n" + String(answerText).slice(0, 8000)
+    );
+  }
+
+  function validateClaims(claims, citationUrls) {
+    const allowed = new Set(citationUrls || []);
+    return (claims || [])
+      .filter((c) => c && normWs(c.text).length > 15)
+      .map((c) => ({
+        text: normWs(c.text).slice(0, 500),
+        url: allowed.has(c.url) ? c.url : "",
+        verifiable: c.verifiable !== false,
+      }))
+      .slice(0, 8);
+  }
+
+  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, STANCES, splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse, DECOMPOSE_SCHEMA, buildDecomposePrompt, validateClaims };
 });

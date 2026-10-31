@@ -41,6 +41,7 @@
   </section>
 
   <section id="analysisStrip" hidden>
+    <span id="stanceFlag" hidden></span>
     <span id="chipRow"></span>
     <span class="spacer"></span>
     <button id="captureBtn" type="button" title="Copy this analysis as an eval case">⤓ case</button>
@@ -52,6 +53,11 @@
   </section>
 
   <section id="status"></section>
+
+  <section id="overview" hidden>
+    <p id="ovSummary"></p>
+    <div id="ovList"></div>
+  </section>
 
   <div id="viewer">
     <iframe id="frame" hidden sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
