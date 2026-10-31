@@ -142,7 +142,7 @@
         out.push(p);
         continue;
       }
-      const sentences = p.split(/(?<=[.!?。！？])\s+/u);
+      const sentences = p.split(/(?<=[。！？；])\s*|(?<=[.!?;])\s+/u);
       let cur = "";
       for (const s of sentences) {
         if ((cur + " " + s).trim().length > 700 && cur) {
@@ -184,6 +184,33 @@
     return { texts: picked.map((b) => b.text), indexMap: picked.map((b) => b.i) };
   }
 
+  // Explode selected paragraph blocks into sentence-level content blocks so
+  // citation pointers come back sentence-grained (custom-content citations
+  // cite whole provided blocks — paragraph blocks would mean paragraph
+  // highlights). indexMap keeps each sentence's original page-block index.
+  function explodeToSentences(texts, indexMap, maxLen = 250) {
+    const outT = [];
+    const outM = [];
+    (texts || []).forEach((t, k) => {
+      const parent = indexMap ? indexMap[k] : k;
+      const sentences = String(t)
+        .split(/(?<=[。！？；])\s*|(?<=[.!?;])\s+/u)
+        .flatMap((s) => {
+          s = s.trim();
+          if (!s) return [];
+          if (s.length <= maxLen) return [s];
+          const parts = [];
+          for (let i = 0; i < s.length; i += maxLen) parts.push(s.slice(i, i + maxLen));
+          return parts;
+        });
+      for (const s of sentences) {
+        outT.push(s);
+        outM.push(parent);
+      }
+    });
+    return { texts: outT, indexMap: outM };
+  }
+
   // Prompt for the citations engine: evidence anchoring comes from the API's
   // citation pointers, the model only writes labels, notes and reasoning.
   function buildCitationsPrompt(claim) {
@@ -192,7 +219,9 @@
       "AI chat answer cites for the CLAIM below. Analyze how (and whether) the source supports the claim.\n\n" +
       "Write your answer as plain lines in EXACTLY this format (no markdown):\n" +
       "EVIDENCE: <label> | <one short sentence: why this passage matters for the claim>\n" +
-      "  - 2 to 5 EVIDENCE lines, each citing the exact passage it refers to (citations are mandatory on every EVIDENCE line)\n" +
+      "  - 2 to 5 EVIDENCE lines. Every EVIDENCE line MUST carry at least one citation to the exact " +
+      "sentence it refers to — an EVIDENCE line without a citation is invalid and will be discarded. " +
+      "Cite single sentences, not whole paragraphs.\n" +
       "  - <label> is a 2-4 character category in the language of the CLAIM (e.g. 原理/推导/结论/数据/示例/条件/背景/观点, " +
       "or Principle/Data/Conclusion for English claims); pick what fits this article's genre\n" +
       "REASONING: <2-3 sentences in the language of the CLAIM explaining the logical chain from source to claim; " +
@@ -204,7 +233,7 @@
   // Turn a citations-enabled response (content blocks with citation arrays)
   // into the shared {reasoning, evidence[]} shape. indexMap maps the
   // document's block indices back to original page block indices (optional).
-  function parseCitationsResponse(content, indexMap) {
+  function parseCitationsResponse(content, indexMap, blockTexts) {
     const evidence = [];
     const reasoningParts = [];
     for (const block of content || []) {
@@ -217,11 +246,26 @@
         const note = normWs(m ? m[2] : text).slice(0, 200);
         for (const c of cits) {
           if (!c.cited_text) continue;
+          const start = c.start_block_index ?? null;
+          const end = c.end_block_index ?? (start != null ? start + 1 : null);
+          if (blockTexts && start != null && end - start > 1) {
+            // A citation spanning several sentence blocks becomes one
+            // evidence item per block, so each quote stays sentence-sized.
+            for (let bi = start; bi < end && bi < blockTexts.length; bi++) {
+              evidence.push({
+                quote: String(blockTexts[bi]),
+                label,
+                note,
+                blockIndex: indexMap ? indexMap[bi] : bi,
+              });
+            }
+            continue;
+          }
           evidence.push({
             quote: String(c.cited_text),
             label,
             note,
-            blockIndex: indexMap && c.start_block_index != null ? indexMap[c.start_block_index] : c.start_block_index,
+            blockIndex: indexMap && start != null ? indexMap[start] : start,
           });
         }
       }
@@ -231,5 +275,5 @@
     return { reasoning: reasoningParts.join(" ").trim(), evidence };
   }
 
-  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, splitIntoBlocks, selectBlocks, buildCitationsPrompt, parseCitationsResponse };
+  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse };
 });

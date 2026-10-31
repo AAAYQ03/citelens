@@ -151,3 +151,14 @@ test("ANALYSIS_SCHEMA closes every object", () => {
   assert.equal(s.additionalProperties, false);
   assert.equal(s.properties.evidence.items.additionalProperties, false);
 });
+
+test("explodeToSentences produces citation-sized chunks with parent mapping", () => {
+  const { texts, indexMap } = core.explodeToSentences(
+    ["First sentence here. Second sentence follows.", "x".repeat(600)],
+    [4, 9]
+  );
+  assert.ok(texts.length >= 4);
+  assert.ok(texts.every((t) => t.length <= 250));
+  assert.ok(indexMap.slice(0, 2).every((i) => i === 4));
+  assert.ok(indexMap.slice(2).every((i) => i === 9));
+});

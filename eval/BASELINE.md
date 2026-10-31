@@ -31,3 +31,32 @@ Cost of the run: ~32k tokens total (≈ a few cents). Duration 28s at concurrenc
 
 Reproduce: `ANTHROPIC_API_KEY=... npx promptfoo@latest eval -c eval/promptfooconfig.yaml`
 (config now runs the 2 engines × 2 models matrix = 48 calls).
+
+---
+
+# Run 2–3: engine × model matrix (2026-10-31)
+
+After adding structured outputs (prompt engine) and the citations engine
+(sentence-level custom-content blocks), with two in-flight fixes found by the eval
+itself: CJK sentence splitting (regex required a space after 。！？, so Chinese text
+never split → whole-paragraph citations), and multi-block citations expanding into
+per-sentence evidence items.
+
+| | Sonnet 5 | Haiku 4.5 |
+| --- | --- | --- |
+| prompt + structured outputs | **11/12** | 8/12 (malformed-JSON class: **0**, was 2) |
+| citations (sentence blocks) | **11/12** | 0/12 — attaches no citation pointers |
+
+Observations:
+
+1. **Structured outputs did exactly what it promised**: Haiku's two malformed-JSON
+   failures are gone by construction; its remaining failures are zh evidence quality.
+2. **Citations engine works on Sonnet** (11/12, all stance rubrics pass; its one miss
+   under-cited a zh source: 1 evidence where 2 required) and **doesn't work on Haiku**,
+   which simply returns no citation pointers in this configuration. The panel now
+   auto-falls back to the prompt engine when citations return zero anchors.
+3. **Promotion decision: deferred.** The pre-declared gate was "beat the baseline on
+   anchor metrics without regressing stance calls" — citations ties prompt+schema
+   11/12 on Sonnet. Constructional anchor fidelity and sentence-grained pointers argue
+   for it; model dependence (Sonnet-only) and a tie on a 12-case set argue against.
+   Default stays prompt+schema; revisit when the dataset reaches ~50 harvested cases.

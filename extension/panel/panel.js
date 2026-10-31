@@ -13,7 +13,7 @@ let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
 
 const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, ANALYSIS_SCHEMA,
-  splitIntoBlocks, selectBlocks, buildCitationsPrompt, parseCitationsResponse } = window.CiteLensCore;
+  splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse } = window.CiteLensCore;
 
 /* --------------------------------- UI bits -------------------------------- */
 
@@ -154,7 +154,8 @@ async function analyze() {
     let body, parsed, excerpt, indexMap = null;
     if (engine === "citations") {
       const blocks = src.blocks?.length ? src.blocks : splitIntoBlocks(src.text);
-      const sel = selectBlocks(blocks, pendingNow.claim);
+      const picked = selectBlocks(blocks, pendingNow.claim);
+      const sel = explodeToSentences(picked.texts, picked.indexMap);
       excerpt = sel.texts.join("\n");
       indexMap = sel.indexMap;
       body = {
@@ -196,12 +197,41 @@ async function analyze() {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error?.message || "API error");
     if (engine === "citations") {
-      parsed = parseCitationsResponse(data.content, indexMap);
+      parsed = parseCitationsResponse(data.content, indexMap, body.messages[0].content[0].source.content.map((c) => c.text));
     } else {
       const raw = (data.content || []).find((b) => b.type === "text")?.text || "";
       parsed = parseAnalysis(raw);
     }
     parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+    if (engine === "citations" && parsed.evidence.length === 0) {
+      // Some models return no citation pointers — fall back to the prompt
+      // engine rather than showing an empty analysis.
+      setStatus('<p class="hint">Citations engine returned no anchors — falling back to the prompt engine…</p>');
+      const fbExcerpt = relevantExcerpt(src.text, pendingNow.claim);
+      const fbRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4000,
+          output_config: { format: { type: "json_schema", schema: ANALYSIS_SCHEMA } },
+          messages: [{ role: "user", content: buildPrompt(pendingNow.claim, fbExcerpt) }],
+        }),
+      });
+      const fbData = await fbRes.json();
+      if (fbRes.ok) {
+        const raw = (fbData.content || []).find((b) => b.type === "text")?.text || "";
+        parsed = parseAnalysis(raw);
+        excerpt = fbExcerpt;
+        parsed.evidence = validateEvidence(parsed.evidence, excerpt);
+        setStatus("");
+      }
+    }
     analysisCache = { key: cacheKey(pendingNow), data: parsed, excerpt, model, engine };
     recordMetric({ ts: Date.now(), model, engine, ms: Math.round(performance.now() - t0), total: parsed.evidence.length });
     renderAnalysis(parsed);

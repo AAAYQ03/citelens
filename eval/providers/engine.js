@@ -27,7 +27,8 @@ class EngineProvider {
 
     let body;
     if (engine === "citations") {
-      const sel = core.selectBlocks(core.splitIntoBlocks(source), claim);
+      const picked = core.selectBlocks(core.splitIntoBlocks(source), claim);
+      const sel = core.explodeToSentences(picked.texts, picked.indexMap);
       body = {
         model,
         max_tokens: 4000,
@@ -73,7 +74,7 @@ class EngineProvider {
     };
 
     if (engine === "citations") {
-      const parsed = core.parseCitationsResponse(data.content, null);
+      const parsed = core.parseCitationsResponse(data.content, null, body.messages[0].content[0].source.content.map((c) => c.text));
       return { output: JSON.stringify(parsed), tokenUsage: usage };
     }
     const raw = (data.content || []).find((b) => b.type === "text")?.text || "";
