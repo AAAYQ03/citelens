@@ -3,11 +3,15 @@
 // months, so candidates are tried in order and the first that matches wins;
 // assistantMessages() reports when none do instead of failing silently.
 const MESSAGE_SELECTORS = [
-  '[data-conversation-role="assistant"]',   // current (Oct 2026)
-  '[data-message-author-role="assistant"]', // previous
-  '[data-turn-key][data-conversation-role]',
-  "article[data-testid^='conversation-turn']",
+  "[data-dil-message-id]",                  // current (Oct 2026): assistant response renderer root
+  "[data-chatgpt-selection-message-id]",
+  '[data-message-author-role="assistant"]', // pre-Oct-2026
+  "[data-turn-key]",
 ];
+// Citation pills are popover triggers now — the URL is only rendered when the
+// popover opens, so we open it programmatically, read the links, and close it.
+const PILL_TRIGGER = '[data-d-component="popover-trigger"]';
+const MIN_MESSAGE_CHARS = 80; // guards against matching tiny label elements
 
 const OWN_HOSTS = ["chatgpt.com", "chat.openai.com"];
 let msgSeq = 0;
@@ -27,6 +31,8 @@ function assistantMessages() {
         console.info("[CiteLens] assistant messages matched by:", sel, "count:", els.length);
       }
       return [...els].filter((el) => {
+        if ((el.innerText || "").length < MIN_MESSAGE_CHARS) return false;
+        if (el.closest("[data-user-message-bubble]") || el.querySelector("[data-user-message-bubble]")) return false;
         const role = el.getAttribute("data-conversation-role") || el.getAttribute("data-message-author-role");
         return !role || role === "assistant";
       });
@@ -68,9 +74,72 @@ const STANCE_FLAGS = {
   not_addressed: { text: "⚠ 来源未提及", cls: "citelens-flag-warn" },
 };
 
+function isExternal(href) {
+  try {
+    const host = new URL(href).hostname;
+    return !OWN_HOSTS.some((h) => host === h || host.endsWith("." + h));
+  } catch {
+    return false;
+  }
+}
+
+function pillsOf(msgEl) {
+  return [...msgEl.querySelectorAll("[data-pill]")].filter((p) => p.closest(PILL_TRIGGER));
+}
+
+function cachedPillUrls(pill) {
+  try {
+    return JSON.parse(pill.dataset.citelensUrls || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function waitFor(fn, timeout) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      const v = fn();
+      if (v || Date.now() - t0 > timeout) {
+        clearInterval(iv);
+        resolve(v || null);
+      }
+    }, 60);
+  });
+}
+
+// Open the pill's popover, read the source links out of it, close it again.
+// User-initiated and cached per pill, so each popover flashes at most once.
+async function harvestPill(pill) {
+  const cached = cachedPillUrls(pill);
+  if (cached.length) return cached;
+  const trigger = pill.closest(PILL_TRIGGER) || pill;
+  const before = new Set(document.querySelectorAll('[role="dialog"]'));
+  trigger.click();
+  const dlg = await waitFor(() => {
+    for (const d of document.querySelectorAll('[role="dialog"]')) {
+      if (!before.has(d) && d.querySelector('a[href^="http"]')) return d;
+    }
+    return null;
+  }, 1800);
+  let urls = [];
+  if (dlg) {
+    urls = [...new Set(
+      [...dlg.querySelectorAll('a[href^="http"]')].map((a) => a.href).filter(isExternal)
+    )];
+  }
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+  if (trigger.getAttribute("aria-expanded") === "true") trigger.click();
+  if (urls.length) pill.dataset.citelensUrls = JSON.stringify(urls);
+  return urls;
+}
+
 function externalUrls(msgEl) {
   const urls = [];
   for (const a of citationAnchors(msgEl)) if (!urls.includes(a.href)) urls.push(a.href);
+  for (const pill of pillsOf(msgEl)) {
+    for (const u of cachedPillUrls(pill)) if (!urls.includes(u)) urls.push(u);
+  }
   return urls;
 }
 
@@ -101,9 +170,32 @@ function decorate(anchor) {
   anchor.insertAdjacentElement("afterend", btn);
 }
 
+function decoratePill(pill) {
+  const anchorEl = pill.closest(PILL_TRIGGER) || pill;
+  if (anchorEl.dataset.citelensDecorated) return;
+  anchorEl.dataset.citelensDecorated = "1";
+  const btn = document.createElement("button");
+  btn.className = "citelens-btn";
+  btn.type = "button";
+  btn.textContent = "◎";
+  btn.title = "CiteLens: open this source beside the answer";
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    btn.textContent = "…";
+    const urls = await harvestPill(pill);
+    btn.textContent = "◎";
+    if (!urls.length) {
+      btn.title = "CiteLens: couldn't read this citation's URL from its popover";
+      return;
+    }
+    chrome.runtime.sendMessage({ type: "openSource", url: urls[0], claim: claimFor(anchorEl) });
+  });
+  anchorEl.insertAdjacentElement("afterend", btn);
+}
+
 function decorateMessage(msgEl) {
-  const urls = externalUrls(msgEl);
-  if (!urls.length) return;
+  if (!externalUrls(msgEl).length && !pillsOf(msgEl).length) return;
   const msgId = "m" + ++msgSeq;
   msgEl.dataset.citelensMsg = msgId;
   const btn = document.createElement("button");
@@ -131,6 +223,7 @@ function scan() {
       a.dataset.citelens = "1";
       decorate(a);
     }
+    for (const pill of pillsOf(msgEl)) decoratePill(pill);
     if (!msgEl.dataset.citelensMsg) decorateMessage(msgEl);
   }
 }
@@ -192,24 +285,28 @@ try {
   // doesn't depend on finding the button at the bottom of it.
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type !== "getLastAnswer") return;
-    scan();
-    const all = assistantMessages();
-    const msgs = all.filter((m) => externalUrls(m).length);
-    const last = msgs[msgs.length - 1];
-    if (!last) {
+    (async () => {
+      scan();
+      const all = assistantMessages();
+      const msgs = all.filter((m) => externalUrls(m).length || pillsOf(m).length);
+      const last = msgs[msgs.length - 1];
+      if (!last) {
+        sendResponse({
+          error: all.length
+            ? "no_citations" // messages found, but none cite external sources
+            : "no_messages", // selectors no longer match ChatGPT's DOM
+        });
+        return;
+      }
+      if (!last.dataset.citelensMsg) decorateMessage(last);
+      // Citation URLs live behind popovers now — harvest them one by one.
+      for (const pill of pillsOf(last)) await harvestPill(pill);
       sendResponse({
-        error: all.length
-          ? "no_citations" // messages found, but none cite external sources
-          : "no_messages", // selectors no longer match ChatGPT's DOM
+        msgId: last.dataset.citelensMsg,
+        text: last.innerText.replace(/◎|Verify answer/g, " ").slice(0, 8000),
+        urls: externalUrls(last),
       });
-      return true;
-    }
-    if (!last.dataset.citelensMsg) decorateMessage(last);
-    sendResponse({
-      msgId: last.dataset.citelensMsg,
-      text: last.innerText.replace(/◎ Verify answer/g, " ").slice(0, 8000),
-      urls: externalUrls(last),
-    });
+    })();
     return true;
   });
 } catch {}
