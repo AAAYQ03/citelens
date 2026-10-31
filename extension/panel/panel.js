@@ -12,7 +12,8 @@ let pendingNow = null;
 let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
 
-const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence } = window.CiteLensCore;
+const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, ANALYSIS_SCHEMA,
+  splitIntoBlocks, selectBlocks, buildCitationsPrompt, parseCitationsResponse } = window.CiteLensCore;
 
 /* --------------------------------- UI bits -------------------------------- */
 
@@ -95,7 +96,7 @@ const cacheKey = (p) => p.url + "||" + p.claim;
 const liveTextWaiters = new Map();
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "pageText" && liveTextWaiters.has(msg.url)) {
-    liveTextWaiters.get(msg.url)(msg.text || null);
+    liveTextWaiters.get(msg.url)({ text: msg.text || null, blocks: msg.blocks || null });
     liveTextWaiters.delete(msg.url);
   }
   if (msg?.type === "analysisApplied" && pendingNow) {
@@ -124,13 +125,13 @@ function getLiveText(url) {
   });
 }
 
-async function getSourceText() {
+async function getSource() {
   // Prefer the RENDERED text from the embedded page (locale variants and
   // JS-rendered content differ from fetched HTML); fall back to fetching.
   const live = await getLiveText(pendingNow.url);
-  if (live && live.length > 300) return live;
+  if (live?.text && live.text.length > 300) return live;
   const article = await getArticle(pendingNow.url);
-  return article.textContent;
+  return { text: article.textContent, blocks: null };
 }
 
 async function analyze() {
@@ -146,9 +147,42 @@ async function analyze() {
   btn.disabled = true;
   btn.textContent = "Analyzing…";
   const model = analysisModel || "claude-sonnet-5";
+  const { engine = "prompt" } = await chrome.storage.local.get("engine");
   const t0 = performance.now();
   try {
-    const excerpt = relevantExcerpt(await getSourceText(), pendingNow.claim);
+    const src = await getSource();
+    let body, parsed, excerpt, indexMap = null;
+    if (engine === "citations") {
+      const blocks = src.blocks?.length ? src.blocks : splitIntoBlocks(src.text);
+      const sel = selectBlocks(blocks, pendingNow.claim);
+      excerpt = sel.texts.join("\n");
+      indexMap = sel.indexMap;
+      body = {
+        model,
+        max_tokens: 4000,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "content", content: sel.texts.map((t) => ({ type: "text", text: t })) },
+              title: hostnameOf(pendingNow.url),
+              citations: { enabled: true },
+            },
+            { type: "text", text: buildCitationsPrompt(pendingNow.claim) },
+          ],
+        }],
+      };
+    } else {
+      excerpt = relevantExcerpt(src.text, pendingNow.claim);
+      body = {
+        model,
+        max_tokens: 4000,
+        // Structured outputs: the model cannot emit malformed JSON.
+        output_config: { format: { type: "json_schema", schema: ANALYSIS_SCHEMA } },
+        messages: [{ role: "user", content: buildPrompt(pendingNow.claim, excerpt) }],
+      };
+    }
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -157,19 +191,19 @@ async function analyze() {
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4000,
-        messages: [{ role: "user", content: buildPrompt(pendingNow.claim, excerpt) }],
-      }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error?.message || "API error");
-    const raw = (data.content || []).find((b) => b.type === "text")?.text || "";
-    const parsed = parseAnalysis(raw);
+    if (engine === "citations") {
+      parsed = parseCitationsResponse(data.content, indexMap);
+    } else {
+      const raw = (data.content || []).find((b) => b.type === "text")?.text || "";
+      parsed = parseAnalysis(raw);
+    }
     parsed.evidence = validateEvidence(parsed.evidence, excerpt);
-    analysisCache = { key: cacheKey(pendingNow), data: parsed, excerpt, model };
-    recordMetric({ ts: Date.now(), model, ms: Math.round(performance.now() - t0), total: parsed.evidence.length });
+    analysisCache = { key: cacheKey(pendingNow), data: parsed, excerpt, model, engine };
+    recordMetric({ ts: Date.now(), model, engine, ms: Math.round(performance.now() - t0), total: parsed.evidence.length });
     renderAnalysis(parsed);
     chrome.storage.session.set({
       analysis: { url: pendingNow.url, evidence: parsed.evidence, ts: Date.now() },
@@ -287,6 +321,7 @@ $("keySave").addEventListener("click", async () => {
   await chrome.storage.local.set({
     anthropicKey: $("keyInput").value.trim(),
     analysisModel: $("modelSelect").value,
+    engine: $("engineSelect").value,
   });
   $("settings").hidden = true;
   setStatus('<p class="hint">API key saved.</p>');
@@ -294,9 +329,10 @@ $("keySave").addEventListener("click", async () => {
 });
 
 chrome.storage.local.get("metrics").then(({ metrics = [] }) => renderMetrics(metrics));
-chrome.storage.local.get(["anthropicKey", "analysisModel"]).then(({ anthropicKey, analysisModel }) => {
+chrome.storage.local.get(["anthropicKey", "analysisModel", "engine"]).then(({ anthropicKey, analysisModel, engine }) => {
   if (anthropicKey) $("keyInput").value = anthropicKey;
   if (analysisModel) $("modelSelect").value = analysisModel;
+  if (engine) $("engineSelect").value = engine;
   chrome.storage.session.get("pending").then(({ pending }) => handle(pending));
 });
 chrome.storage.onChanged.addListener((changes, area) => {

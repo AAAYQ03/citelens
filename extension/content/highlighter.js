@@ -34,10 +34,14 @@
     chrome.storage.session.get("textRequest").then(({ textRequest }) => {
       if (!textRequest || !isMe(textRequest.url)) return;
       try {
+        const blockEls = [...document.querySelectorAll("p, li, blockquote, h1, h2, h3, h4, td, pre")]
+          .filter((el) => !el.closest(".citelens-note") && el.innerText && el.innerText.trim().length > 20)
+          .slice(0, 150);
         chrome.runtime.sendMessage({
           type: "pageText",
           url: textRequest.url,
           text: (document.body?.innerText || "").slice(0, 20000),
+          blocks: blockEls.map((el) => el.innerText.trim().slice(0, 1500)),
         });
       } catch {}
     });

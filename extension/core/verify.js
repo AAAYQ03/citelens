@@ -108,5 +108,128 @@
     return hit / list.length;
   }
 
-  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate };
+  // JSON Schema for structured outputs on the prompt engine
+  // (output_config.format; every object needs additionalProperties:false).
+  const ANALYSIS_SCHEMA = {
+    type: "object",
+    properties: {
+      reasoning: { type: "string" },
+      evidence: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            quote: { type: "string" },
+            label: { type: "string" },
+            note: { type: "string" },
+          },
+          required: ["quote", "label", "note"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["reasoning", "evidence"],
+    additionalProperties: false,
+  };
+
+  // Split flat text into paragraph-ish blocks (fallback when the live page
+  // can't provide DOM blocks, and for the eval harness).
+  function splitIntoBlocks(text) {
+    const paras = String(text ?? "").split(/\n{2,}/).map(normWs).filter(Boolean);
+    const out = [];
+    for (const p of paras) {
+      if (p.length <= 700) {
+        out.push(p);
+        continue;
+      }
+      const sentences = p.split(/(?<=[.!?。！？])\s+/u);
+      let cur = "";
+      for (const s of sentences) {
+        if ((cur + " " + s).trim().length > 700 && cur) {
+          out.push(cur.trim());
+          cur = s;
+        } else {
+          cur = (cur + " " + s).trim();
+        }
+      }
+      if (cur) out.push(cur.trim());
+    }
+    return out;
+  }
+
+  // BM25-lite: keep the blocks most relevant to the claim within a char
+  // budget, preserving document order. Returns the chosen texts plus a map
+  // back to original block indices.
+  function selectBlocks(blocks, claim, budget = 10000) {
+    const claimTokens = tokenize(claim);
+    const scored = (blocks || [])
+      .map((text, i) => ({ text: normWs(text), i, sc: score(claimTokens, tokenize(text)) }))
+      .filter((b) => b.text.length > 0);
+    const byScore = [...scored].sort((a, b) => b.sc - a.sc);
+    // Zero-relevance blocks (nav junk, unrelated sections) only qualify when
+    // nothing matches the claim at all.
+    const relevant = byScore.filter((b) => b.sc > 0);
+    const pool = relevant.length ? relevant : byScore;
+    const chosen = new Set();
+    let used = 0;
+    for (const b of pool) {
+      if (used + b.text.length > budget) {
+        if (chosen.size >= 3) break;
+        continue;
+      }
+      chosen.add(b.i);
+      used += b.text.length;
+    }
+    const picked = scored.filter((b) => chosen.has(b.i));
+    return { texts: picked.map((b) => b.text), indexMap: picked.map((b) => b.i) };
+  }
+
+  // Prompt for the citations engine: evidence anchoring comes from the API's
+  // citation pointers, the model only writes labels, notes and reasoning.
+  function buildCitationsPrompt(claim) {
+    return (
+      "You are a citation-verification assistant. The attached document is the source that an " +
+      "AI chat answer cites for the CLAIM below. Analyze how (and whether) the source supports the claim.\n\n" +
+      "Write your answer as plain lines in EXACTLY this format (no markdown):\n" +
+      "EVIDENCE: <label> | <one short sentence: why this passage matters for the claim>\n" +
+      "  - 2 to 5 EVIDENCE lines, each citing the exact passage it refers to (citations are mandatory on every EVIDENCE line)\n" +
+      "  - <label> is a 2-4 character category in the language of the CLAIM (e.g. 原理/推导/结论/数据/示例/条件/背景/观点, " +
+      "or Principle/Data/Conclusion for English claims); pick what fits this article's genre\n" +
+      "REASONING: <2-3 sentences in the language of the CLAIM explaining the logical chain from source to claim; " +
+      "if the source does not actually support the claim, say so plainly and state what it actually says>\n\n" +
+      "CLAIM:\n" + claim
+    );
+  }
+
+  // Turn a citations-enabled response (content blocks with citation arrays)
+  // into the shared {reasoning, evidence[]} shape. indexMap maps the
+  // document's block indices back to original page block indices (optional).
+  function parseCitationsResponse(content, indexMap) {
+    const evidence = [];
+    const reasoningParts = [];
+    for (const block of content || []) {
+      if (block.type !== "text") continue;
+      const text = String(block.text || "");
+      const cits = block.citations || [];
+      if (cits.length) {
+        const m = text.match(/EVIDENCE:\s*([^|\n]{1,12})\|\s*([^\n]*)/);
+        const label = normWs(m ? m[1] : "").slice(0, 6) || "证据";
+        const note = normWs(m ? m[2] : text).slice(0, 200);
+        for (const c of cits) {
+          if (!c.cited_text) continue;
+          evidence.push({
+            quote: String(c.cited_text),
+            label,
+            note,
+            blockIndex: indexMap && c.start_block_index != null ? indexMap[c.start_block_index] : c.start_block_index,
+          });
+        }
+      }
+      const rm = text.match(/REASONING:\s*([\s\S]*)/);
+      if (rm) reasoningParts.push(normWs(rm[1]));
+    }
+    return { reasoning: reasoningParts.join(" ").trim(), evidence };
+  }
+
+  return { normWs, tokenize, score, relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, anchorRate, ANALYSIS_SCHEMA, splitIntoBlocks, selectBlocks, buildCitationsPrompt, parseCitationsResponse };
 });

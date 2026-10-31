@@ -107,3 +107,47 @@ test("buildPrompt embeds claim and excerpt verbatim", () => {
   assert.ok(p.includes("CLAIM:\nMY CLAIM"));
   assert.ok(p.includes("EXCERPT:\nMY EXCERPT"));
 });
+
+test("splitIntoBlocks splits paragraphs and chunks long ones", () => {
+  const short = core.splitIntoBlocks("Para one.\n\nPara two.");
+  assert.deepEqual(short, ["Para one.", "Para two."]);
+  const long = core.splitIntoBlocks("A sentence here. ".repeat(100)); // ~1700 chars
+  assert.ok(long.length >= 2);
+  assert.ok(long.every((b) => b.length <= 750));
+});
+
+test("selectBlocks keeps document order and respects budget", () => {
+  const blocks = ["solar efficiency data here", "unrelated cooking recipe", "more solar panel efficiency numbers"];
+  const sel = core.selectBlocks(blocks, "solar panel efficiency", 60);
+  assert.ok(sel.texts.length >= 1);
+  // order of returned indices must be ascending (document order)
+  const sorted = [...sel.indexMap].sort((a, b) => a - b);
+  assert.deepEqual(sel.indexMap, sorted);
+  // relevant blocks outrank the recipe under a tight budget
+  assert.ok(!sel.texts.includes("unrelated cooking recipe"));
+});
+
+test("parseCitationsResponse extracts labeled evidence and reasoning", () => {
+  const out = core.parseCitationsResponse(
+    [
+      {
+        type: "text",
+        text: "EVIDENCE: 数据 | gives the exact percentage",
+        citations: [{ type: "content_block_location", cited_text: "61% of firms", start_block_index: 2, end_block_index: 3 }],
+      },
+      { type: "text", text: "REASONING: the source gives the number directly." },
+    ],
+    [5, 7, 9]
+  );
+  assert.equal(out.evidence.length, 1);
+  assert.equal(out.evidence[0].quote, "61% of firms");
+  assert.equal(out.evidence[0].label, "数据");
+  assert.equal(out.evidence[0].blockIndex, 9);
+  assert.ok(out.reasoning.includes("directly"));
+});
+
+test("ANALYSIS_SCHEMA closes every object", () => {
+  const s = core.ANALYSIS_SCHEMA;
+  assert.equal(s.additionalProperties, false);
+  assert.equal(s.properties.evidence.items.additionalProperties, false);
+});

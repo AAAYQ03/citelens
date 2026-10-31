@@ -15,6 +15,10 @@
   <section id="settings" hidden>
     <label for="keyInput">API Key</label>
     <input id="keyInput" type="password" placeholder="sk-ant-… (stored only in this browser)" />
+    <select id="engineSelect" title="Analysis engine">
+      <option value="prompt">Prompt engine</option>
+      <option value="citations">Citations engine (experimental)</option>
+    </select>
     <select id="modelSelect" title="Analysis model">
       <option value="claude-sonnet-5">Sonnet 5 · balanced (~$0.016)</option>
       <option value="claude-opus-5">Opus 5 · deepest, slower (~$0.04)</option>

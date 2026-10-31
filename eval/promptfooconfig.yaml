@@ -6,11 +6,21 @@ description: CiteLens citation-analysis quality (anchor rate, verbatim rate, sta
 prompts:
   - file://prompts/analyze.js
 
+# Engine x model matrix. Both engines run through the same code the
+# extension ships (extension/core/verify.js via providers/engine.js).
 providers:
-  - id: anthropic:messages:claude-sonnet-5
-    config: { max_tokens: 4000 }
-  - id: anthropic:messages:claude-haiku-4-5
-    config: { max_tokens: 4000 }
+  - id: file://providers/engine.js
+    label: "prompt+schema · sonnet-5"
+    config: { engine: prompt, model: claude-sonnet-5 }
+  - id: file://providers/engine.js
+    label: "prompt+schema · haiku-4-5"
+    config: { engine: prompt, model: claude-haiku-4-5 }
+  - id: file://providers/engine.js
+    label: "citations · sonnet-5"
+    config: { engine: citations, model: claude-sonnet-5 }
+  - id: file://providers/engine.js
+    label: "citations · haiku-4-5"
+    config: { engine: citations, model: claude-haiku-4-5 }
 
 defaultTest:
   options:
