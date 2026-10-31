@@ -132,9 +132,10 @@ async function fetchConversationCitations() {
       headers: { Authorization: "Bearer " + token },
     }).then((r) => (r.ok ? r.json() : null));
     if (!convo?.mapping) return null;
-    const refs = [];
+    const byMessage = {};
     const allUrls = [];
     for (const node of Object.values(convo.mapping)) {
+      const msgId = node?.message?.id;
       const md = node?.message?.metadata || {};
       const pools = []
         .concat(Array.isArray(md.content_references) ? md.content_references : [])
@@ -150,12 +151,18 @@ async function fetchConversationCitations() {
         (ref.safe_urls || []).forEach(push);
         (ref.refs || []).forEach((r) => push(r?.url));
         if (!urls.length) continue;
-        refs.push({ urls, matched: String(ref.matched_text || ref.text || "").replace(/\s+/g, " ").trim() });
+        (byMessage[msgId] = byMessage[msgId] || []).push({
+          urls,
+          matched: String(ref.matched_text || ref.text || "").replace(/\s+/g, " ").trim(),
+          start: ref.start_idx ?? ref.start_ix ?? 0,
+        });
         for (const u of urls) if (!allUrls.includes(u)) allUrls.push(u);
       }
     }
-    convoCache = { id: convId, at: Date.now(), refs, allUrls };
-    console.info("[CiteLens] conversation API:", refs.length, "citation refs,", allUrls.length, "urls");
+    for (const list of Object.values(byMessage)) list.sort((a, b) => a.start - b.start);
+    convoCache = { id: convId, at: Date.now(), byMessage, allUrls };
+    const nRefs = Object.values(byMessage).reduce((s, l) => s + l.length, 0);
+    console.info("[CiteLens] conversation API:", nRefs, "citation refs in", Object.keys(byMessage).length, "messages,", allUrls.length, "urls");
     return convoCache;
   } catch (e) {
     console.warn("[CiteLens] conversation API failed:", e?.message || e);
@@ -195,24 +202,38 @@ async function harvestPill(pill) {
   if (cached.length) return cached;
 
   const data = await fetchConversationCitations();
-  if (data?.refs?.length) {
+  if (data) {
+    const msgEl = pill.closest("[data-dil-message-id]");
+    const apiId = msgEl?.getAttribute("data-dil-message-id");
+    // DOM message id === API message id, so pills only ever resolve against
+    // their own message's citations, in start_idx order.
+    const msgRefs = (apiId && data.byMessage[apiId]) || [];
     const block = pill.closest("p, li, td, blockquote, h1, h2, h3, div");
     const blockText = (block?.innerText || "").replace(/\s+/g, " ").trim();
-    // 1) anchor by matched_text; 2) by pill order within the message; 3) all urls
-    let urls =
-      data.refs.find((r) => r.matched && r.matched.length > 8 && blockText.includes(r.matched.slice(0, 80)))?.urls;
-    if (!urls) {
-      const msgEl = pill.closest("[data-dil-message-id], [data-chatgpt-selection-message-id]") || document;
+    let via = null;
+    let ref = msgRefs.find(
+      (r) => r.matched && r.matched.length > 8 && blockText.includes(r.matched.slice(0, 80))
+    );
+    if (ref) via = "matched_text";
+    if (!ref && msgEl && msgRefs.length) {
       const idx = pillsOf(msgEl).indexOf(pill);
-      if (idx >= 0 && data.refs[idx]) urls = data.refs[idx].urls;
+      if (idx >= 0 && msgRefs[idx]) {
+        ref = msgRefs[idx];
+        via = "pill order";
+      }
     }
-    if (!urls) urls = data.allUrls;
-    urls = (urls || []).slice(0, 5);
+    let urls = ref?.urls || [];
+    if (!urls.length && msgRefs.length) {
+      urls = [...new Set(msgRefs.flatMap((r) => r.urls))];
+      via = "message pool";
+    }
+    urls = urls.slice(0, 5);
     if (urls.length) {
       pill.dataset.citelensUrls = JSON.stringify(urls);
-      console.info("[CiteLens] pill harvest (API):", urls);
+      console.info("[CiteLens] pill harvest (API via " + via + "):", urls);
       return urls;
     }
+    console.warn("[CiteLens] API had no refs for message", apiId, "— falling back to hover");
   }
 
   // Fallback: synthetic hover (works only if the hover-card accepts untrusted events)
