@@ -113,34 +113,58 @@ function waitFor(fn, timeout) {
   });
 }
 
-// Open the pill's popover, read the source links out of it, close it again.
-// User-initiated and cached per pill, so each popover flashes at most once.
+// ChatGPT's citation pills navigate on CLICK and show a hover-card with the
+// source links on HOVER. So we synthesize a hover (with real coordinates, for
+// hover-intent checks), diff the page's anchors before/after to catch the
+// card's links wherever they render, then hover out. Never click — that
+// navigates the whole tab away.
+function fireMouse(el, types) {
+  const r = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    clientX: r.left + r.width / 2,
+    clientY: r.top + r.height / 2,
+  };
+  for (const type of types) {
+    el.dispatchEvent(
+      type.startsWith("pointer")
+        ? new PointerEvent(type, { ...opts, pointerType: "mouse" })
+        : new MouseEvent(type, opts)
+    );
+  }
+}
+
 async function harvestPill(pill) {
   const cached = cachedPillUrls(pill);
   if (cached.length) return cached;
   const trigger = pill.closest(PILL_TRIGGER) || pill;
-  const before = new Set(document.querySelectorAll('[role="dialog"]'));
-  trigger.click();
-  const dlg = await waitFor(() => {
-    for (const d of document.querySelectorAll('[role="dialog"]')) {
-      if (!before.has(d) && d.querySelector('a[href^="http"]')) return d;
-    }
-    return null;
+  const beforeAnchors = new Set(document.querySelectorAll('a[href^="http"]'));
+  fireMouse(trigger, ["pointerover", "pointerenter", "mouseover", "mouseenter", "mousemove"]);
+  let urls = await waitFor(() => {
+    const fresh = [...document.querySelectorAll('a[href^="http"]')].filter(
+      (a) => !beforeAnchors.has(a) && isExternal(a.href)
+    );
+    return fresh.length ? [...new Set(fresh.map((a) => a.href))] : null;
   }, 1800);
-  let urls = [];
-  if (dlg) {
-    urls = [...new Set(
-      [...dlg.querySelectorAll('a[href^="http"]')].map((a) => a.href).filter(isExternal)
-    )];
-    if (!urls.length) {
-      console.warn("[CiteLens] popover opened but held no external links:", dlg.outerHTML.slice(0, 600));
-    }
-  } else {
-    console.warn("[CiteLens] no popover with links appeared within 1.8s after clicking the pill trigger");
+  if (!urls) {
+    // some hover-cards open on focus instead
+    try { trigger.focus({ preventScroll: true }); } catch {}
+    urls = await waitFor(() => {
+      const fresh = [...document.querySelectorAll('a[href^="http"]')].filter(
+        (a) => !beforeAnchors.has(a) && isExternal(a.href)
+      );
+      return fresh.length ? [...new Set(fresh.map((a) => a.href))] : null;
+    }, 900);
+  }
+  fireMouse(trigger, ["pointerout", "pointerleave", "mouseout", "mouseleave"]);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+  urls = urls || [];
+  if (!urls.length) {
+    console.warn("[CiteLens] hover produced no new external links for this pill");
   }
   console.info("[CiteLens] pill harvest:", urls);
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  if (trigger.getAttribute("aria-expanded") === "true") trigger.click();
   if (urls.length) pill.dataset.citelensUrls = JSON.stringify(urls);
   return urls;
 }
