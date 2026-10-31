@@ -11,6 +11,7 @@ const DNR_RULE_ID = 7001;
 let pendingNow = null;
 let readerCache = { url: null, article: null };
 let analysisCache = { key: null, data: null };
+let applyWatchdog = null;
 
 const { relevantExcerpt, buildPrompt, parseAnalysis, validateEvidence, ANALYSIS_SCHEMA,
   splitIntoBlocks, selectBlocks, explodeToSentences, buildCitationsPrompt, parseCitationsResponse,
@@ -107,7 +108,15 @@ chrome.runtime.onMessage.addListener((msg) => {
     liveTextWaiters.get(msg.url)({ text: msg.text || null, blocks: msg.blocks || null });
     liveTextWaiters.delete(msg.url);
   }
+  if (msg?.type === "frameMismatch" && pendingNow) {
+    clearTimeout(applyWatchdog);
+    setStatus(
+      '<p class="hint">Embedded page redirected to a different URL than the citation — annotations may not attach. Fallback: open in new tab ↗</p>'
+    );
+    console.warn("[CiteLens] frame/pending URL mismatch:", msg.frameUrl, "vs", msg.pendingUrl);
+  }
   if (msg?.type === "analysisApplied" && pendingNow) {
+    clearTimeout(applyWatchdog);
     updateLastMetricLocated(msg.count);
     if (msg.count === 0 && msg.total > 0) {
       setStatus('<p class="error">未能在页面中定位证据 — 试试在新标签页打开 ↗</p>');
@@ -246,6 +255,12 @@ async function analyze() {
     chrome.storage.session.set({
       analysis: { url: pendingNow.url, evidence: parsed.evidence, ts: Date.now() },
     });
+    clearTimeout(applyWatchdog);
+    applyWatchdog = setTimeout(() => {
+      setStatus(
+        '<p class="hint">Annotations haven\'t attached in the embedded page — open in new tab ↗ to see them.</p>'
+      );
+    }, 4000);
   } catch (e) {
     setStatus(`<p class="error">Analysis failed: ${e.message || e}</p>`);
   } finally {

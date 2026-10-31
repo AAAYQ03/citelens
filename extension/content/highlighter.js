@@ -5,12 +5,30 @@
   const norm = (u) => {
     try {
       const x = new URL(u);
-      return x.origin + x.pathname.replace(/\/$/, "");
+      return x.hostname.replace(/^www\./, "") + x.pathname.replace(/\/$/, "");
     } catch {
       return "";
     }
   };
-  const isMe = (url) => norm(url) === norm(location.href);
+  const host = (u) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  };
+  // Inside CiteLens's own side-panel iframe, redirects routinely change the
+  // path — fall back to hostname matching there (and only there).
+  const inOurPanel = (() => {
+    try {
+      return !!location.ancestorOrigins?.[0]?.startsWith("chrome-extension://");
+    } catch {
+      return false;
+    }
+  })();
+  const isMe = (url) =>
+    norm(url) === norm(location.href) || (inOurPanel && host(url) === host(location.href));
+  let mismatchReported = false;
 
   let lastAnalysisTs = 0;
   function applyAnalysis(analysis, attempt = 0) {
@@ -52,6 +70,17 @@
     chrome.storage.session.get(["pending", "analysis"]).then(({ pending, analysis }) => {
       if (analysis && isMe(analysis.url) && analysis.evidence?.length) {
         setTimeout(() => applyAnalysis(analysis), 800);
+      } else if ((analysis || pending) && inOurPanel && !mismatchReported && !isMe((analysis || pending).url)) {
+        // We're the embedded frame but the URL doesn't line up (redirect?) —
+        // report it instead of silently ignoring the job.
+        mismatchReported = true;
+        try {
+          chrome.runtime.sendMessage({
+            type: "frameMismatch",
+            frameUrl: location.href,
+            pendingUrl: (analysis || pending).url,
+          });
+        } catch {}
       }
     });
   }
