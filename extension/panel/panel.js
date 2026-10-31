@@ -526,8 +526,12 @@ $("verifyAllBtn").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab?.id) throw new Error("no active tab");
     const req = await chrome.tabs.sendMessage(tab.id, { type: "getLastAnswer" });
-    if (!req) {
-      setStatus('<p class="error">No cited ChatGPT answer found in the active tab.</p>');
+    if (!req || req.error) {
+      setStatus(
+        req?.error === "no_messages"
+          ? '<p class="error">Couldn\'t find ChatGPT\'s messages — the page markup changed. See the console warning from CiteLens.</p>'
+          : '<p class="error">This answer cites no external sources, so there is nothing to verify.</p>'
+      );
       return;
     }
     enterOverview({ ...req, ts: Date.now() });

@@ -1,11 +1,66 @@
 // CiteLens content script — ChatGPT adapter.
-// Selectors are centralized here so host-DOM changes are a one-line fix.
-const SELECTORS = {
-  assistantMessage: '[data-message-author-role="assistant"]',
-};
+// Host-DOM selectors live here. ChatGPT renames these attributes every few
+// months, so candidates are tried in order and the first that matches wins;
+// assistantMessages() reports when none do instead of failing silently.
+const MESSAGE_SELECTORS = [
+  '[data-conversation-role="assistant"]',   // current (Oct 2026)
+  '[data-message-author-role="assistant"]', // previous
+  '[data-turn-key][data-conversation-role]',
+  "article[data-testid^='conversation-turn']",
+];
 
 const OWN_HOSTS = ["chatgpt.com", "chat.openai.com"];
 let msgSeq = 0;
+let activeSelector = null;
+
+function assistantMessages() {
+  for (const sel of MESSAGE_SELECTORS) {
+    let els;
+    try {
+      els = document.querySelectorAll(sel);
+    } catch {
+      continue;
+    }
+    if (els.length) {
+      if (activeSelector !== sel) {
+        activeSelector = sel;
+        console.info("[CiteLens] assistant messages matched by:", sel, "count:", els.length);
+      }
+      return [...els].filter((el) => {
+        const role = el.getAttribute("data-conversation-role") || el.getAttribute("data-message-author-role");
+        return !role || role === "assistant";
+      });
+    }
+  }
+  if (activeSelector !== "none") {
+    activeSelector = "none";
+    console.warn(
+      "[CiteLens] no assistant messages matched — ChatGPT's DOM changed. " +
+        "Update MESSAGE_SELECTORS in content/chatgpt.js."
+    );
+  }
+  return [];
+}
+
+// A citation can be an anchor, or a pill element wrapping/wrapped by one.
+function citationAnchors(msgEl) {
+  const found = new Set();
+  msgEl.querySelectorAll('a[href^="http"]').forEach((a) => found.add(a));
+  msgEl.querySelectorAll("[data-pill]").forEach((pill) => {
+    const a = pill.matches('a[href^="http"]')
+      ? pill
+      : pill.querySelector('a[href^="http"]') || pill.closest('a[href^="http"]');
+    if (a) found.add(a);
+  });
+  return [...found].filter((a) => {
+    try {
+      const host = new URL(a.href).hostname;
+      return !OWN_HOSTS.some((h) => host === h || host.endsWith("." + h));
+    } catch {
+      return false;
+    }
+  });
+}
 
 const STANCE_FLAGS = {
   overstated: { text: "⚠ 夸大", cls: "citelens-flag-warn" },
@@ -15,13 +70,7 @@ const STANCE_FLAGS = {
 
 function externalUrls(msgEl) {
   const urls = [];
-  msgEl.querySelectorAll('a[href^="http"]').forEach((a) => {
-    try {
-      const host = new URL(a.href).hostname;
-      if (OWN_HOSTS.some((h) => host === h || host.endsWith("." + h))) return;
-      if (!urls.includes(a.href)) urls.push(a.href);
-    } catch {}
-  });
+  for (const a of citationAnchors(msgEl)) if (!urls.includes(a.href)) urls.push(a.href);
   return urls;
 }
 
@@ -76,21 +125,14 @@ function decorateMessage(msgEl) {
 }
 
 function scan() {
-  document
-    .querySelectorAll(`${SELECTORS.assistantMessage} a[href^="http"]:not([data-citelens])`)
-    .forEach((a) => {
+  for (const msgEl of assistantMessages()) {
+    for (const a of citationAnchors(msgEl)) {
+      if (a.dataset.citelens) continue;
       a.dataset.citelens = "1";
-      try {
-        const host = new URL(a.href).hostname;
-        if (OWN_HOSTS.some((h) => host === h || host.endsWith("." + h))) return;
-      } catch {
-        return;
-      }
       decorate(a);
-    });
-  document
-    .querySelectorAll(`${SELECTORS.assistantMessage}:not([data-citelens-msg])`)
-    .forEach((m) => decorateMessage(m));
+    }
+    if (!msgEl.dataset.citelensMsg) decorateMessage(msgEl);
+  }
 }
 
 /* ---- paint overview results back onto the answer ---- */
@@ -151,12 +193,15 @@ try {
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type !== "getLastAnswer") return;
     scan();
-    const msgs = [...document.querySelectorAll(SELECTORS.assistantMessage)].filter(
-      (m) => externalUrls(m).length
-    );
+    const all = assistantMessages();
+    const msgs = all.filter((m) => externalUrls(m).length);
     const last = msgs[msgs.length - 1];
     if (!last) {
-      sendResponse(null);
+      sendResponse({
+        error: all.length
+          ? "no_citations" // messages found, but none cite external sources
+          : "no_messages", // selectors no longer match ChatGPT's DOM
+      });
       return true;
     }
     if (!last.dataset.citelensMsg) decorateMessage(last);

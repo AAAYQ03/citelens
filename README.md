@@ -110,7 +110,7 @@ eval case with one click (⤓). Details: [eval/README.md](eval/README.md).
   (bounded: concurrency 2, 6-call budget), and paints exception flags back onto the
   answer itself
 - Select any text in the answer → verify it, beyond citation granularity
-- claude.ai adapter (the ChatGPT adapter is ~50 lines; selectors are config)
+- claude.ai adapter (the ChatGPT adapter is one file; selector candidates are a list)
 - Exportable verification reports; multi-model "citation diff"
 
 ## Stack
