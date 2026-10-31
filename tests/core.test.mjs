@@ -222,6 +222,8 @@ test("validateSpans: verbatim-in-claim, enum, overlap-free, source-quote check",
   assert.equal(out[0].text, "coffee lowers diabetes risk");
   assert.equal(out[0].evidence_quote, "associated with a LOWER risk");
   assert.equal(out[1].evidence_quote, "");
+  assert.equal(out[1].quoteDropped, true, "failed quote is flagged, not silently emptied");
+  assert.equal(out[0].quoteDropped, false);
   assert.ok(out[0].pos < out[1].pos);
 });
 

@@ -127,8 +127,12 @@
       if (pos < 0) continue;
       if (out.some((o) => pos < o.pos + o.text.length && o.pos < pos + t.length)) continue;
       let eq = normWs(s.evidence_quote || "");
-      if (eq && !nx.includes(eq)) eq = "";
-      out.push({ text: t, pos, type: s.type, note: String(s.note ?? "").slice(0, 200), evidence_quote: eq });
+      let quoteDropped = false;
+      if (eq && !nx.includes(eq)) {
+        eq = "";
+        quoteDropped = true; // the model offered a quote but it failed verbatim validation
+      }
+      out.push({ text: t, pos, type: s.type, note: String(s.note ?? "").slice(0, 200), evidence_quote: eq, quoteDropped });
     }
     out.sort((a, b) => a.pos - b.pos);
     return out.slice(0, 8);

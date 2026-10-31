@@ -343,12 +343,19 @@ function renderClaimSpans(spans) {
     const node = document.createElement("span");
     node.textContent = text.slice(sp.pos, sp.pos + sp.text.length);
     node.style.background = (meta.color || "#64748b") + "33";
-    node.style.borderBottom = "2px solid " + (meta.color || "#64748b");
+    // solid underline = anchored to a verified source quote (clickable);
+    // dashed = no anchor, nothing to jump to.
+    node.style.borderBottom =
+      (sp.evidence_quote ? "2px solid " : "2px dashed ") + (meta.color || "#64748b");
     node.style.cursor = sp.evidence_quote ? "pointer" : "default";
     const tip =
       (meta.zh || sp.type) +
       (sp.note ? " · " + sp.note : "") +
-      (sp.evidence_quote ? "（点击定位原文）" : "");
+      (sp.evidence_quote
+        ? "（点击定位原文）"
+        : sp.quoteDropped
+          ? "（模型给的原文引文未通过逐字校验，已丢弃）"
+          : "（无对应原文锚点）");
     node.addEventListener("mouseenter", () => showTip(node, tip));
     node.addEventListener("mouseleave", hideTip);
     if (sp.evidence_quote) {
