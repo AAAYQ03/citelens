@@ -166,39 +166,29 @@ async function fetchConversationCitations() {
       return out;
     };
 
-    // Pass 1 — a global pointer table: pill refs store pointers like
-    // "turn0search3" whose URLs live in search_result_groups entries
-    // (sometimes on the tool message, not the assistant one).
-    const ptrMap = {};
+    // Assistant messages embed citation markers (turn0search3-style tokens
+    // wrapped in private-use unicode) directly in their content text; adjacent
+    // tokens form one pill ("+1" pills carry several sources). The matching
+    // search_result_groups entries map ref_type+ref_index -> url. This gives
+    // an exact, ordered pill -> urls mapping.
+    const byMessage = {};
+    const allUrls = [];
+    const globalIdx = {};
     for (const node of Object.values(convo.mapping)) {
       const md = node?.message?.metadata || {};
       for (const g of md.search_result_groups || []) {
         for (const e of g?.entries || []) {
-          if (!e?.url) continue;
-          if (typeof e.ref_id === "string") ptrMap[e.ref_id] = e.url;
-          else if (e.ref_id && typeof e.ref_id === "object") {
-            const { turn_index, ref_type, ref_index } = e.ref_id;
-            if (ref_type != null && ref_index != null) {
-              ptrMap["turn" + (turn_index ?? 0) + ref_type + ref_index] = e.url;
-            }
+          const rid = e?.ref_id;
+          if (e?.url && rid && rid.ref_type != null && rid.ref_index != null) {
+            globalIdx[String(rid.ref_type) + rid.ref_index] = e.url;
           }
         }
       }
     }
-
-    const resolvePointers = (list) =>
-      [...new Set(
-        (Array.isArray(list) ? list : [])
-          .map((p) => (typeof p === "string" ? ptrMap[p] : null))
-          .filter(Boolean)
-          .filter(isExternal)
-      )];
-
-    const byMessage = {};
-    const allUrls = [];
     for (const node of Object.values(convo.mapping)) {
-      const msgId = node?.message?.id;
-      const md = node?.message?.metadata || {};
+      const msg = node?.message;
+      const msgId = msg?.id;
+      const md = msg?.metadata || {};
       const refs = [];
       const pool = [];
       const addPool = (u) => {
@@ -207,31 +197,56 @@ async function fetchConversationCitations() {
           if (!allUrls.includes(u)) allUrls.push(u);
         }
       };
+
+      const localIdx = {};
+      for (const g of md.search_result_groups || []) {
+        for (const e of g?.entries || []) {
+          const rid = e?.ref_id;
+          if (e?.url && rid && rid.ref_type != null && rid.ref_index != null) {
+            localIdx[String(rid.ref_type) + rid.ref_index] = e.url;
+          }
+          addPool(e?.url);
+        }
+      }
+      const lookup = (k) => localIdx[k] || globalIdx[k];
+
+      // Marker-derived pills, in document order; tokens <=15 chars apart
+      // belong to the same pill.
+      const content = (msg?.content?.parts || []).filter((p) => typeof p === "string").join("\n");
+      const marks = [...content.matchAll(/turn\d+([a-z]+)(\d+)/g)];
+      let group = null;
+      for (const mk of marks) {
+        const url = lookup(mk[1] + mk[2]);
+        if (!url || !isExternal(url)) continue;
+        if (group && mk.index - group.end <= 15) {
+          if (!group.urls.includes(url)) group.urls.push(url);
+          group.end = mk.index + mk[0].length;
+        } else {
+          group = { urls: [url], matched: "", start: mk.index, end: mk.index + mk[0].length };
+          refs.push(group);
+        }
+      }
+      refs.forEach((r) => r.urls.forEach(addPool));
+
+      // Shape-based refs (items/sources/url keys) feed the pool; the
+      // sources_footnote never anchors a pill, and shape refs only join the
+      // pill list when a message has no marker-derived pills at all.
       const sources = []
         .concat(Array.isArray(md.content_references) ? md.content_references : [])
         .concat(Array.isArray(md.citations) ? md.citations : []);
       for (const ref of sources) {
         if (ref?.type && SKIP_REF_TYPES.has(ref.type)) continue;
-        let urls = [...new Set(deepUrls(ref).filter(isExternal))];
-        if (!urls.length) urls = resolvePointers(ref.refs);
+        const urls = [...new Set(deepUrls(ref).filter(isExternal))];
         if (!urls.length) continue;
-        if (ref?.type === "sources_footnote") {
-          // The all-sources footer lists everything; it is pool material,
-          // never a per-pill anchor (it broke pill-order mapping before).
-          urls.forEach(addPool);
-          continue;
-        }
-        refs.push({
-          urls,
-          matched: String(ref.matched_text || ref.text || "").replace(/\s+/g, " ").trim(),
-          start: ref.start_idx ?? ref.start_ix ?? 0,
-        });
         urls.forEach(addPool);
-      }
-      // search_result_groups = what the model's web search saw; low-confidence
-      // message-level fallback only, never used for per-pill ordering.
-      for (const g of md.search_result_groups || []) {
-        for (const e of g?.entries || []) addPool(e?.url);
+        if (ref?.type === "sources_footnote") continue;
+        if (!refs.length) {
+          refs.push({
+            urls,
+            matched: String(ref.matched_text || "").replace(/\s+/g, " ").trim(),
+            start: ref.start_idx ?? ref.start_ix ?? 0,
+          });
+        }
       }
       if (refs.length || pool.length) {
         refs.sort((a, b) => a.start - b.start);
