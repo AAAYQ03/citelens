@@ -113,6 +113,60 @@ function waitFor(fn, timeout) {
   });
 }
 
+// Primary URL source: ChatGPT's own conversation API. The page is
+// same-origin, so we can read the session token and fetch the conversation,
+// whose assistant messages carry content_references with every citation URL
+// (and matched_text anchoring each citation to its answer text). No DOM games.
+let convoCache = { id: null, at: 0, refs: [], allUrls: [] };
+
+async function fetchConversationCitations() {
+  const convId = location.pathname.match(/\/c\/([0-9a-f-]{20,})/)?.[1];
+  if (!convId) return null;
+  if (convoCache.id === convId && Date.now() - convoCache.at < 60000) return convoCache;
+  try {
+    const sess = await fetch("/api/auth/session", { credentials: "include" }).then((r) => r.json());
+    const token = sess?.accessToken;
+    if (!token) return null;
+    const convo = await fetch("/backend-api/conversation/" + convId, {
+      credentials: "include",
+      headers: { Authorization: "Bearer " + token },
+    }).then((r) => (r.ok ? r.json() : null));
+    if (!convo?.mapping) return null;
+    const refs = [];
+    const allUrls = [];
+    for (const node of Object.values(convo.mapping)) {
+      const md = node?.message?.metadata || {};
+      const pools = []
+        .concat(Array.isArray(md.content_references) ? md.content_references : [])
+        .concat(Array.isArray(md.citations) ? md.citations : []);
+      for (const ref of pools) {
+        const urls = [];
+        const push = (u) => {
+          if (typeof u === "string" && /^https?:/.test(u) && isExternal(u) && !urls.includes(u)) urls.push(u);
+        };
+        push(ref.url);
+        push(ref.metadata?.url);
+        (ref.items || []).forEach((it) => push(it?.url));
+        (ref.safe_urls || []).forEach(push);
+        (ref.refs || []).forEach((r) => push(r?.url));
+        if (!urls.length) continue;
+        refs.push({ urls, matched: String(ref.matched_text || ref.text || "").replace(/\s+/g, " ").trim() });
+        for (const u of urls) if (!allUrls.includes(u)) allUrls.push(u);
+      }
+    }
+    convoCache = { id: convId, at: Date.now(), refs, allUrls };
+    console.info("[CiteLens] conversation API:", refs.length, "citation refs,", allUrls.length, "urls");
+    return convoCache;
+  } catch (e) {
+    console.warn("[CiteLens] conversation API failed:", e?.message || e);
+    return null;
+  }
+}
+
+function pillText(el) {
+  return (el.innerText || "").replace(/\s+/g, " ").trim();
+}
+
 // ChatGPT's citation pills navigate on CLICK and show a hover-card with the
 // source links on HOVER. So we synthesize a hover (with real coordinates, for
 // hover-intent checks), diff the page's anchors before/after to catch the
@@ -139,6 +193,29 @@ function fireMouse(el, types) {
 async function harvestPill(pill) {
   const cached = cachedPillUrls(pill);
   if (cached.length) return cached;
+
+  const data = await fetchConversationCitations();
+  if (data?.refs?.length) {
+    const block = pill.closest("p, li, td, blockquote, h1, h2, h3, div");
+    const blockText = (block?.innerText || "").replace(/\s+/g, " ").trim();
+    // 1) anchor by matched_text; 2) by pill order within the message; 3) all urls
+    let urls =
+      data.refs.find((r) => r.matched && r.matched.length > 8 && blockText.includes(r.matched.slice(0, 80)))?.urls;
+    if (!urls) {
+      const msgEl = pill.closest("[data-dil-message-id], [data-chatgpt-selection-message-id]") || document;
+      const idx = pillsOf(msgEl).indexOf(pill);
+      if (idx >= 0 && data.refs[idx]) urls = data.refs[idx].urls;
+    }
+    if (!urls) urls = data.allUrls;
+    urls = (urls || []).slice(0, 5);
+    if (urls.length) {
+      pill.dataset.citelensUrls = JSON.stringify(urls);
+      console.info("[CiteLens] pill harvest (API):", urls);
+      return urls;
+    }
+  }
+
+  // Fallback: synthetic hover (works only if the hover-card accepts untrusted events)
   const trigger = pill.closest(PILL_TRIGGER) || pill;
   const beforeAnchors = new Set(document.querySelectorAll('a[href^="http"]'));
   fireMouse(trigger, ["pointerover", "pointerenter", "mouseover", "mouseenter", "mousemove"]);
