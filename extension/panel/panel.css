@@ -165,3 +165,16 @@ header {
 .ov-status.bad { color: #b91c1c; }
 .ov-status.muted { color: #a8a29e; }
 .ov-text { flex: 1; min-width: 0; color: #44403c; }
+
+/* claim span breakdown */
+#claimCard { align-items: flex-start; }
+#claimCard .chip { margin-top: 2px; }
+#claimText:not(.clamped) { white-space: normal; max-height: 120px; overflow-y: auto; line-height: 1.7; }
+#spanTip {
+  position: fixed; z-index: 60; max-width: 320px;
+  padding: 6px 10px; border-radius: 8px;
+  background: #1c1917; color: #fafaf9;
+  font-size: 12px; line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}

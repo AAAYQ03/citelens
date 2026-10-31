@@ -306,9 +306,34 @@ function focusEvidence(ev) {
   chrome.storage.session.set({ focus: { url: pendingNow.url, quote: ev.quote, ts: Date.now() } });
 }
 
+function spanTipEl() {
+  let t = document.getElementById("spanTip");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "spanTip";
+    t.hidden = true;
+    document.body.appendChild(t);
+  }
+  return t;
+}
+function showTip(target, text) {
+  const t = spanTipEl();
+  t.textContent = text;
+  t.hidden = false;
+  const r = target.getBoundingClientRect();
+  t.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 330)) + "px";
+  t.style.top = r.bottom + 6 + "px";
+}
+function hideTip() {
+  const t = document.getElementById("spanTip");
+  if (t) t.hidden = true;
+}
+
 function renderClaimSpans(spans) {
   const el = $("claimText");
   if (!spans?.length || !pendingNow?.claim) return;
+  // The colored breakdown is the point — show the whole claim, multi-line.
+  el.classList.remove("clamped");
   el.textContent = "";
   const text = pendingNow.claim.replace(/\s+/g, " ").trim();
   let cursor = 0;
@@ -320,7 +345,12 @@ function renderClaimSpans(spans) {
     node.style.background = (meta.color || "#64748b") + "33";
     node.style.borderBottom = "2px solid " + (meta.color || "#64748b");
     node.style.cursor = sp.evidence_quote ? "pointer" : "default";
-    node.title = (meta.zh || sp.type) + (sp.note ? "：" + sp.note : "");
+    const tip =
+      (meta.zh || sp.type) +
+      (sp.note ? " · " + sp.note : "") +
+      (sp.evidence_quote ? "（点击定位原文）" : "");
+    node.addEventListener("mouseenter", () => showTip(node, tip));
+    node.addEventListener("mouseleave", hideTip);
     if (sp.evidence_quote) {
       node.addEventListener("click", (e) => {
         e.stopPropagation();
